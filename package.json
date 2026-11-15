@@ -19,7 +19,7 @@
     "@nuxt/icon": "^2.2.0",
     "@nuxtjs/color-mode": "^4.0.0",
     "@tailwindcss/vite": "^4.1.18",
-    "@techstark/opencv-js": "^4.5.2",
+    "@techstark/opencv-js": "^5.0.0-release.1",
     "nuxt": "^4.2.2",
     "tailwindcss": "^4.1.18",
     "tesseract.js": "^7.0.0",
@@ -36,7 +36,5 @@
     "lint-staged": "^16.2.7",
     "typescript": "^5.9.3"
   },
-  "lint-staged": {
-    "*": "npm run lint"
-  }
+  "lint-staged": {}
 }

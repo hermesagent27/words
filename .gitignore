@@ -86,3 +86,6 @@ Desktop.ini
 .nuxt
 .output
 .nitro
+
+# Node
+node_modules/
