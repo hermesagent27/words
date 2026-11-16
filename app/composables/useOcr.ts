@@ -48,8 +48,9 @@ async function getTesseract() {
 }
 
 // Minimum OCR confidence (0-100) to accept a letter. Below this we return ''
-// so noise never becomes a fake letter.
-const MIN_CONFIDENCE = 60
+// so noise never becomes a fake letter. 70 is stricter than the default 60
+// and drops borderline glyphs that would otherwise poison the solver.
+const MIN_CONFIDENCE = 70
 
 export function useOcr() {
   const processing = ref(false)
@@ -201,23 +202,32 @@ export function useOcr() {
     col: number,
     cellSize: number,
   ): Promise<string> {
-    const inset = Math.floor(cellSize * 0.15)
+    const inset = Math.floor(cellSize * 0.18)
     const inner = cellSize - inset * 2
     const rect = new cv.Rect(col * cellSize + inset, row * cellSize + inset, inner, inner)
     const cell = warped.roi(rect)
 
-    // Otsu binarization, inverted: dark ink becomes white (255) on black (0)
+    // Otsu binarization, inverted: dark ink becomes white (255) on black (0).
+    // Otsu works well when lighting is even; under glare it fragments glyphs.
+    // We follow with a morphological open to drop single-pixel specks and fuse
+    // nearly-touching pieces of the same stroke.
     const bin = new cv.Mat()
     cv.threshold(cell, bin, 0, 255, cv.THRESH_BINARY_INV | cv.THRESH_OTSU)
     cell.delete()
     rect.delete?.()
 
+    const openKernel = cv.getStructuringElement(cv.MORPH_ELLIPSE, new cv.Size(2, 2))
+    const opened = new cv.Mat()
+    cv.morphologyEx(bin, opened, cv.MORPH_OPEN, openKernel)
+    bin.delete()
+    openKernel.delete()
+
     // Connected components with stats
     const labels = new cv.Mat()
     const stats = new cv.Mat()
     const centroids = new cv.Mat()
-    const count = cv.connectedComponentsWithStats(bin, labels, stats, centroids, 8, cv.CV_32S)
-    bin.delete()
+    const count = cv.connectedComponentsWithStats(opened, labels, stats, centroids, 8, cv.CV_32S)
+    opened.delete()
 
     const cx = inner / 2
     const cy = inner / 2
