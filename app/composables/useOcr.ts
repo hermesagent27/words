@@ -48,9 +48,10 @@ async function getTesseract() {
 }
 
 // Minimum OCR confidence (0-100) to accept a letter. Below this we return ''
-// so noise never becomes a fake letter. 70 is stricter than the default 60
-// and drops borderline glyphs that would otherwise poison the solver.
-const MIN_CONFIDENCE = 70
+// so noise never becomes a fake letter. This is per-frame; cross-frame
+// consensus in WordsGame.vue is the real noise filter, so we can accept
+// weaker glyphs (thin strokes, faint print) on any single frame.
+const MIN_CONFIDENCE = 55
 
 export function useOcr() {
   const processing = ref(false)
@@ -202,7 +203,7 @@ export function useOcr() {
     col: number,
     cellSize: number,
   ): Promise<string> {
-    const inset = Math.floor(cellSize * 0.18)
+    const inset = Math.floor(cellSize * 0.15)
     const inner = cellSize - inset * 2
     const rect = new cv.Rect(col * cellSize + inset, row * cellSize + inset, inner, inner)
     const cell = warped.roi(rect)

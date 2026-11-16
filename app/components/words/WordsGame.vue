@@ -143,6 +143,46 @@ const bestWord = ref<ScoredWord | null>(null)
 const lastSignature = ref<string>('')
 const statusLine = ref('Starting…')
 
+// Per-cell consensus voting. Each cell has a candidate letter (latest read)
+// and a stable letter (committed). A letter is only committed after
+// CONSENSUS_FRAMES consecutive scans agree. Blurry/glare frames that read
+// '' or the wrong letter don't drop the committed letter immediately; we
+// tolerate up to MISS_TOLERANCE misses before clearing it.
+// This stops the constant flicker/rescan of single cells under glare.
+const CONSENSUS_FRAMES = 2
+const MISS_TOLERANCE = 3
+interface CellState { candidate: string, candidateCount: number, committed: string, missCount: number }
+const cellState: CellState[][] = Array.from({ length: 4 }, () =>
+  Array.from({ length: 4 }, () => ({ candidate: '', candidateCount: 0, committed: '', missCount: 0 })),
+)
+
+// Vote a new read into the cell. Returns the committed letter (or '' if none yet).
+function voteCell(r: number, c: number, read: string): string {
+  const s = cellState[r][c]
+  if (read === '') {
+    s.candidate = ''
+    s.candidateCount = 0
+    s.missCount++
+    // Tolerate transient blanks (glare, shake) before clearing the letter.
+    if (s.missCount >= MISS_TOLERANCE) {
+      s.committed = ''
+      s.missCount = 0
+    }
+    return s.committed
+  }
+  s.missCount = 0
+  if (s.candidate === read) {
+    s.candidateCount++
+  } else {
+    s.candidate = read
+    s.candidateCount = 1
+  }
+  if (s.candidateCount >= CONSENSUS_FRAMES && s.committed !== s.candidate) {
+    s.committed = s.candidate
+  }
+  return s.committed
+}
+
 const SCAN_INTERVAL_MS = 1500
 let scanTimer: ReturnType<typeof setInterval> | null = null
 
@@ -196,8 +236,20 @@ async function scanTick() {
     return
   }
 
-  // Compute signature of this board to detect changes
-  const sig = result.tiles.flat().map(t => t.letter).join('|')
+  // Vote each cell's fresh read into its consensus state. Committed letters
+  // only change after CONSENSUS_FRAMES consecutive matching reads.
+  const committedTiles: Tile[][] = []
+  for (let r = 0; r < 4; r++) {
+    const rowTiles: Tile[] = []
+    for (let c = 0; c < 4; c++) {
+      const committed = voteCell(r, c, result.tiles[r][c].letter)
+      rowTiles.push({ letter: committed, row: r, col: c })
+    }
+    committedTiles.push(rowTiles)
+  }
+
+  // Compute signature of this committed board to detect changes
+  const sig = committedTiles.flat().map(t => t.letter).join('|')
   if (sig === lastSignature.value) {
     // Same board, refresh path overlay but don't re-solve
     detection.value = { corners: result.corners }
@@ -207,10 +259,10 @@ async function scanTick() {
 
   lastSignature.value = sig
   detection.value = { corners: result.corners }
-  tiles.value = result.tiles
+  tiles.value = committedTiles
   statusLine.value = 'Solving…'
   solveCurrent()
-  statusLine.value = `Board locked — ${tiles.value.flat().map(t => t.letter).join(' ')}`
+  statusLine.value = `Board locked — ${committedTiles.flat().map(t => t.letter || '?').join(' ')}`
 }
 
 function solveManual() {
