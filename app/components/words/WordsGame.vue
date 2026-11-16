@@ -27,17 +27,6 @@
           @input="manualTiles[Math.floor(i/4)][i%4].letter = manualTiles[Math.floor(i/4)][i%4].letter.toUpperCase()"
         >
       </div>
-      <div class="grid grid-cols-4 gap-2 mb-2">
-        <input
-          v-for="(t, i) in manualTiles.flat()"
-          :key="i"
-          v-model.number="manualTiles[Math.floor(i/4)][i%4].dots"
-          type="number"
-          min="1"
-          max="4"
-          class="input input-bordered text-center"
-        >
-      </div>
       <button class="btn btn-primary btn-sm" @click="solveManual">Solve</button>
     </div>
 
@@ -142,7 +131,7 @@ const { processing, detectGrid } = useOcr()
 const manualMode = ref(false)
 const manualTiles = ref<Tile[][]>(
   Array.from({ length: 4 }, (_, r) =>
-    Array.from({ length: 4 }, (_, c) => ({ letter: '', dots: 1, row: r, col: c })),
+    Array.from({ length: 4 }, (_, c) => ({ letter: '', row: r, col: c })),
   ),
 )
 
@@ -208,7 +197,7 @@ async function scanTick() {
   }
 
   // Compute signature of this board to detect changes
-  const sig = result.tiles.flat().map(t => `${t.letter}${t.dots}`).join('|')
+  const sig = result.tiles.flat().map(t => t.letter).join('|')
   if (sig === lastSignature.value) {
     // Same board, refresh path overlay but don't re-solve
     detection.value = { corners: result.corners }

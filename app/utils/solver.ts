@@ -4,7 +4,6 @@
 
 export interface Tile {
   letter: string
-  dots: number // 1..4
   row: number
   col: number
 }
@@ -18,6 +17,18 @@ export interface ScoredWord {
   word: string
   score: number
   path: PathStep[]
+}
+
+// Standard Scrabble tile values (English edition).
+export const SCRABBLE_VALUES: Record<string, number> = {
+  A: 1, B: 3, C: 3, D: 2, E: 1, F: 4, G: 2, H: 4, I: 1, J: 8,
+  K: 5, L: 1, M: 3, N: 1, O: 1, P: 3, Q: 10, R: 1, S: 1, T: 1,
+  U: 1, V: 4, W: 4, X: 8, Y: 4, Z: 10,
+}
+
+export function letterValue(letter: string): number {
+  if (!letter) return 0
+  return SCRABBLE_VALUES[letter.toUpperCase()] ?? 0
 }
 
 class TrieNode {
@@ -60,7 +71,8 @@ function inBounds(r: number, c: number) {
 
 /**
  * Find every valid word on the board, return them sorted by score desc then length desc.
- * Tiles: 4x4 array of { letter, dots }.
+ * Word score = sum of Scrabble letter values along the path.
+ * Tiles: 4x4 array of { letter }.
  * trie: pre-built dictionary trie.
  */
 export function solveBoard(tiles: Tile[][], trie: Trie): ScoredWord[] {
@@ -75,7 +87,7 @@ export function solveBoard(tiles: Tile[][], trie: Trie): ScoredWord[] {
     if (!next) return
 
     const newPath = [...path, { row: r, col: c }]
-    const newScore = score + tile.dots
+    const newScore = score + letterValue(tile.letter)
 
     if (next.isWord) {
       const word = newPath.map(p => tiles[p.row][p.col].letter.toLowerCase()).join('')

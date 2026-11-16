@@ -147,13 +147,15 @@ export function useOcr() {
       const M = cv.getPerspectiveTransform(srcTri, dstTri)
       cv.warpPerspective(gray, dst, M, new cv.Size(warpSize, warpSize), cv.INTER_LINEAR)
 
-      // Extract 16 cell letters
+      // Extract 16 cell letters (await each async OCR call so `letter` is a
+      // string, not a Promise — otherwise the solver receives Promise objects
+      // and crashes on `tile.letter.toLowerCase()`)
       const cellSize = warpSize / 4
       const tiles: Tile[][] = []
       for (let r = 0; r < 4; r++) {
         const row: Tile[] = []
         for (let c = 0; c < 4; c++) {
-          const letter = extractCellLetter(cv, dst, r, c, cellSize)
+          const letter = await extractCellLetter(cv, dst, r, c, cellSize)
           row.push({ letter, row: r, col: c })
         }
         tiles.push(row)
