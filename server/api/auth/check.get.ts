@@ -1,14 +1,14 @@
-import { getCookie } from 'h3'
+import { getCookie } from "h3";
 
 export default defineEventHandler((event) => {
-  const config = useRuntimeConfig()
+  const config = useRuntimeConfig();
 
   // Check shared marketplace cookie first, then app-specific
-  const sharedAuth = getCookie(event, 'app-auth')
-  const appAuth = getCookie(event, 'words-auth')
+  const sharedAuth = getCookie(event, "app-auth");
+  const appAuth = getCookie(event, "words-auth");
 
-  const authenticated = (sharedAuth && sharedAuth === config.authPassword) ||
-                        (appAuth && appAuth === config.authPassword)
+  const authenticated = (sharedAuth && sharedAuth === config.authPassword)
+    || (appAuth && appAuth === config.authPassword);
 
-  return { authenticated: !!authenticated }
-})
+  return { authenticated: !!authenticated };
+});

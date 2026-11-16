@@ -1,0 +1,1 @@
+import{_ as s,x as a,y as t,z as c,a0 as n}from"./DEsXFp3A.js";const o={},r={class:"flex flex-col min-h-screen"};function l(e,_){return t(),a("div",r,[c("main",null,[n(e.$slots,"default")])])}const d=s(o,[["render",l]]);export{d as default};

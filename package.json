@@ -29,6 +29,7 @@
   "devDependencies": {
     "@antfu/eslint-config": "^6.7.3",
     "@iconify-json/tabler": "^1.2.26",
+    "@types/node": "^26.6.6",
     "daisyui": "^5.5.14",
     "eslint": "^9.39.2",
     "eslint-plugin-format": "^1.2.0",
@@ -36,5 +37,9 @@
     "lint-staged": "^16.2.7",
     "typescript": "^5.9.3"
   },
-  "lint-staged": {}
+  "lint-staged": {
+    "*.{js,ts,vue,mjs,cjs,json,md,css,html,yaml,yml}": [
+      "eslint --fix"
+    ]
+  }
 }

@@ -34,4 +34,12 @@ export default withNuxt(antfu({
       tsconfigRootDir: ".",
     }],
   },
+}, {
+  // Server-side/build files legitimately read process.env (Nitro runtime,
+  // nuxt.config build-time config). The browser app must not, so the rule
+  // stays on everywhere else.
+  files: ["server/**", "nuxt.config.ts"],
+  rules: {
+    "node/no-process-env": "off",
+  },
 }));

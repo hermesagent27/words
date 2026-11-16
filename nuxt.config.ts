@@ -25,10 +25,10 @@ export default defineNuxtConfig({
     ],
   },
   nitro: {
-    preset: 'vercel',
+    preset: "vercel",
     sourceMap: false,
   },
   runtimeConfig: {
-    authPassword: process.env.APP_PASSWORD || process.env.AUTH_PASSWORD || 'changeme',
+    authPassword: process.env.APP_PASSWORD || process.env.AUTH_PASSWORD || "changeme",
   },
 });
