@@ -6,6 +6,7 @@ import { applyGravity, solveBoard } from "~/utils/solver";
 const { trie, load: loadWords } = useWordList();
 const { videoEl, canvasEl, ready: cameraReady, error: cameraError, start: startCamera, stop: stopCamera, switchCamera, captureFrame } = useCamera();
 const { processing, detectGrid } = useOcr();
+const { public: { appVersion } } = useRuntimeConfig();
 
 const manualMode = ref(false);
 const manualTiles = ref<Tile[][]>(
@@ -520,6 +521,10 @@ if (typeof document !== "undefined") {
           </div>
         </div>
       </div>
+    </div>
+
+    <div class="text-center text-xs text-base-content/40 mt-4">
+      v{{ appVersion }}
     </div>
   </div>
 </template>

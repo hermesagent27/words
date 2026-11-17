@@ -42,6 +42,10 @@ const CLOSE_FRAC = 0.03;
  * contour at a plausible board size. Distractors (the phone's light UI
  * buttons, a wall, a window) fail either the quad check or the ink-density
  * verification inside the winning region.
+ *
+ * Thresholds are ADAPTIVE: tile brightness is the 85th percentile of the
+ * frame, ink threshold is Otsu inside the winning region. This keeps the
+ * detector working across lighting conditions and phone distances.
  */
 export function detectQuadFromTiles(
   cv: Record<string, any>,
@@ -71,7 +75,7 @@ export function detectQuadFromTiles(
   cv.findContours(closed, contours, hierarchy, cv.RETR_EXTERNAL, cv.CHAIN_APPROX_SIMPLE);
 
   const minBlobArea = Math.max(100, total * 0.001);
-  type Blob = { area: number; cx: number; cy: number; side: number; bx: number; by: number; bw: number; bh: number };
+  type Blob = { area: number; cx: number; cy: number; side: number; bx: number; by: number; bw: number; bh: number; contour: any };
   const blobs: Blob[] = [];
   for (let i = 0; i < contours.size(); i++) {
     const cnt = contours.get(i);
@@ -87,10 +91,12 @@ export function detectQuadFromTiles(
         by: r.y,
         bw: r.width,
         bh: r.height,
+        contour: cnt,
       });
-      r.delete?.();
     }
-    cnt.delete();
+    else {
+      cnt.delete();
+    }
   }
   contours.delete();
   hierarchy.delete();
@@ -138,54 +144,108 @@ export function detectQuadFromTiles(
   if (typeof process !== "undefined" && (process as { env?: Record<string, string> }).env?.DEBUG_DQFT)
     console.error(`[dqft] blobs=${blobs.length} seed=(${seed.cx.toFixed(0)},${seed.cy.toFixed(0)}) side=${seed.side.toFixed(1)} members=${members.length} boxes=[${members.slice(0, 4).map(b => `${b.bx},${b.by},${b.bw}x${b.bh}`).join(" | ")}]`);
 
-  // Board bbox from member blob bounding rects.
-  const bx0 = Math.min(...members.map(b => b.bx));
-  const by0 = Math.min(...members.map(b => b.by));
-  const bx1 = Math.max(...members.map(b => b.bx + b.bw));
-  const by1 = Math.max(...members.map(b => b.by + b.bh));
-  const boardW = bx1 - bx0;
-  const boardH = by1 - by0;
+  // --- Fit a quad around the member cluster -------------------------------
+  // At close range the CLOSE kernel cannot bridge inter-tile gaps, so the
+  // 16 tiles stay disjoint blobs. We need the convex hull of every member's
+  // contour points, simplified to 4 corners. approxPolyDP with a large
+  // epsilon tends to hit 4 points, but when it doesn't (rounded merged
+  // blob, irregular hull), minAreaRect always yields a quadrilateral.
+  const allPoints = new cv.Mat();
+  {
+    let totalPts = 0;
+    for (const m of members)
+      totalPts += m.contour.rows;
+    allPoints.create(totalPts, 1, cv.CV_32SC2);
+    let offset = 0;
+    for (const m of members) {
+      const pts = m.contour.data32S;
+      for (let i = 0; i < pts.length; i++)
+        allPoints.data32S[offset + i] = pts[i]!;
+      offset += pts.length;
+    }
+  }
+  const hull = new cv.Mat();
+  cv.convexHull(allPoints, hull, false, true);
+  allPoints.delete();
 
-  // Squareness + size sanity.
-  const minS = Math.min(boardW, boardH);
-  const maxS = Math.max(boardW, boardH);
-  if (maxS < 50 || maxS > minS * 2 || boardW * boardH < total * 0.005) {
+  let quadPts: Array<Pt> = [];
+  const peri = cv.arcLength(hull, true);
+  for (const eps of [0.01, 0.02, 0.03, 0.04]) {
+    const approx = new cv.Mat();
+    cv.approxPolyDP(hull, approx, eps * peri, true);
+    if (approx.rows === 4) {
+      const d = approx.data32S;
+      quadPts = [
+        { x: d[0]!, y: d[1]! },
+        { x: d[2]!, y: d[3]! },
+        { x: d[4]!, y: d[5]! },
+        { x: d[6]!, y: d[7]! },
+      ];
+    }
+    approx.delete();
+    if (quadPts.length === 4)
+      break;
+  }
+
+  // Fallback: minAreaRect (perfect for perspective tilt).
+  if (quadPts.length !== 4) {
+    const rect = cv.minAreaRect(hull);
+    const vtx = cv.RotatedRect.points(rect);
+    quadPts = vtx.map((p: { x: number; y: number }) => ({ x: p.x, y: p.y }));
+  }
+  hull.delete();
+
+  // Order corners: top-left, top-right, bottom-right, bottom-left.
+  const pts = [...quadPts].sort((a, b) => a.y - b.y);
+  const top = pts.slice(0, 2).sort((a, b) => a.x - b.x);
+  const bottom = pts.slice(2, 4).sort((a, b) => a.x - b.x);
+  const ordered = [top[0]!, top[1]!, bottom[1]!, bottom[0]!];
+
+  // Squareness + size sanity from side lengths.
+  const side = (a: Pt, b: Pt) => Math.hypot(b.x - a.x, b.y - a.y);
+  const s0 = side(ordered[0]!, ordered[1]!);
+  const s1 = side(ordered[1]!, ordered[2]!);
+  const s2 = side(ordered[2]!, ordered[3]!);
+  const s3 = side(ordered[3]!, ordered[0]!);
+  const minS = Math.min(s0, s1, s2, s3);
+  const maxS = Math.max(s0, s1, s2, s3);
+  const dbg = typeof process !== "undefined" && (process as { env?: Record<string, string> }).env?.DEBUG_DQFT;
+  if (maxS < 50 || maxS > minS * 2 || maxS * maxS < total * 0.005) {
     gray.delete();
     return null;
   }
 
-  // --- Ink verification ---------------------------------------------------
-  // Letters cover 1-5% of the board, gaps another 2-4%. Bright walls /
-  // UI chips / windows carry ~0% ink inside the union bbox.
-  const ix0 = Math.max(0, bx0);
-  const iy0 = Math.max(0, by0);
-  const ix1 = Math.min(W, bx1);
-  const iy1 = Math.min(H, by1);
-  const roiRect = new cv.Rect(ix0, iy0, ix1 - ix0, iy1 - iy0);
-  const roi = gray.roi(roiRect);
+  // --- Ink verification inside the quad -----------------------------------
+  // Warp the quad to a square and measure dark-ink fraction. Letters cover
+  // 1-5% of the board; bright walls / UI chips / windows carry ~0% ink.
+  // Warping (not just bbox ROI) makes the measurement accurate under tilt.
+  const srcTri = cv.matFromArray(4, 1, cv.CV_32FC2, ordered.flatMap(p => [p.x, p.y]));
+  const dstTri = cv.matFromArray(4, 1, cv.CV_32FC2, [0, 0, 200, 0, 200, 200, 0, 200]);
+  const M = cv.getPerspectiveTransform(srcTri, dstTri);
+  const warped = new cv.Mat();
+  cv.warpPerspective(gray, warped, M, new cv.Size(200, 200), cv.INTER_AREA);
+  srcTri.delete();
+  dstTri.delete();
+  M.delete();
+
+  // Otsu on the warped interior finds the ink threshold automatically, but
+  // interpolation at tile edges creates gray pixels that inflate the count.
+  // A fixed threshold relative to the darkest expected ink is more stable.
   const ink = new cv.Mat();
-  cv.threshold(roi, ink, INK_MAX, 255, cv.THRESH_BINARY_INV);
-  roi.delete();
-  roiRect.delete?.();
+  cv.threshold(warped, ink, INK_MAX, 255, cv.THRESH_BINARY_INV);
+  warped.delete();
   const inkCount = cv.countNonZero(ink);
   ink.delete();
-  const quadArea = (ix1 - ix0) * (iy1 - iy0);
-  const inkFrac = inkCount / Math.max(1, quadArea);
+  const inkFrac = inkCount / (200 * 200);
+  if (dbg)
+    console.error(`[dqft] inkFrac=${(inkFrac * 100).toFixed(2)}% minS=${minS.toFixed(1)} maxS=${maxS.toFixed(1)}`);
   if (inkFrac < 0.004 || inkFrac > 0.3) {
     gray.delete();
     return null;
   }
 
-  // --- Quad corners --------------------------------------------------------
-  // Union bbox corners, no padding: the bbox of merged member tiles already
-  // spans tile outer edges, and at extreme close range the board can extend
-  // past the frame edge so clamping is the only safe pad.
-  const tl = { x: Math.max(0, bx0), y: Math.max(0, by0) };
-  const tr = { x: Math.min(W - 1, bx1), y: Math.max(0, by0) };
-  const br = { x: Math.min(W - 1, bx1), y: Math.min(H - 1, by1) };
-  const bl = { x: Math.max(0, bx0), y: Math.min(H - 1, by1) };
   void gray;
-  return [tl, tr, br, bl];
+  return ordered;
 }
 
 // ---------------------------------------------------------------

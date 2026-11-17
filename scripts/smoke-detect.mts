@@ -17,6 +17,8 @@ type FrameOpts = {
   boardSide: number;
   perspectiveSkew?: number; // px shift of top edge to fake perspective
   extraBlobs?: Array<{ x: number; y: number; s: number }>; // dark distractors off-board
+  inkScale?: number; // multiplier on letter stroke width (thin ink at distance)
+  tileBright?: number; // tile gray level (default 250)
 };
 
 async function makeFrame(o: FrameOpts): Promise<Buffer> {
@@ -33,6 +35,8 @@ async function makeFrame(o: FrameOpts): Promise<Buffer> {
   const cell = o.boardSide / 4;
   const tileInner = cell * 0.86 | 0;
   const pad = (cell - tileInner) / 2 | 0;
+  const tileGray = o.tileBright ?? 250;
+  const inkScale = o.inkScale ?? 1;
   for (let r = 0; r < 4; r++) {
     for (let c = 0; c < 4; c++) {
       const cx = bx + c * cell + pad + (r === 0 ? skew : 0); // top row shifted
@@ -42,15 +46,15 @@ async function makeFrame(o: FrameOpts): Promise<Buffer> {
           if (x < 0 || x >= W || y < 0 || y >= H)
             continue;
           const off = (y * W + x) * 3;
-          frame[off] = 250;
-          frame[off + 1] = 248;
-          frame[off + 2] = 244; // warm white tile, brighter than bg
+          frame[off] = tileGray;
+          frame[off + 1] = tileGray - 2;
+          frame[off + 2] = tileGray - 6; // warm white tile, brighter than bg
         }
       }
       // dark letter-ish blob: two strokes so connected components see an L
       const lx = cx + tileInner * 0.42 | 0;
       const ly = cy + tileInner * 0.28 | 0;
-      const lw = Math.max(2, tileInner * 0.12 | 0);
+      const lw = Math.max(1, (tileInner * 0.12 * inkScale) | 0);
       const lh = tileInner * 0.44 | 0;
       for (let y = ly; y < ly + lh; y++) {
         for (let x = lx; x < lx + lw; x++) {
@@ -137,6 +141,12 @@ const cases: Array<[string, FrameOpts]> = [
     { x: 60, y: 60, s: 20 },
     { x: 1200, y: 850, s: 30 },
   ] }],
+  // Real-world stresses: thin ink (far away), dim tiles, tilt
+  ["far 300px thin ink", { boardSide: 300, inkScale: 0.5 }],
+  ["far 300px dim tiles", { boardSide: 300, tileBright: 200 }],
+  ["medium 500px tilt", { boardSide: 500, perspectiveSkew: 60 }],
+  ["far 300px tilt", { boardSide: 300, perspectiveSkew: 30 }],
+  ["close 940px tilt", { boardSide: 940, perspectiveSkew: 120 }],
 ];
 for (const [label, o] of cases) {
   if (await runCase(label, o))
