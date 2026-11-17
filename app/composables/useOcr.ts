@@ -2,21 +2,14 @@
 // Loads OpenCV.js + Tesseract.js lazily and reads the 4x4 letter board from
 // whatever distance the phone happens to be at.
 //
-// Detection strategy (distance-invariant):
-//   1. Downscale the frame to a fixed working width so every scale costs the
-//      same regardless of camera resolution.
-//   2. Search the ENTIRE frame (no fixed ROI band) for the board's blue
-//      rounded-square backing. Ruzzle's board sits on a distinctive blue
-//      field; thresholding hue in that range leaves a mask of exactly one
-//      big object, which makes the contour hunt trivial at any distance.
-//   3. Take all >= 4-point contours whose side length clears a one-tile
-//      floor (a 4-point contour can only be as small as one letter tile and
-//      still produce a warped cell big enough to OCR). Rank by area, warp
-//      each candidate to a normalized square, and accept the first one that
-//      actually OCRs into letters.
-//   4. Warp size scales up (700px -> 175px cells) so tiny distant boards get
-//      magnified to Tesseract-friendly glyph size; close boards get
-//      downscaled, which is equally free.
+// Detection strategy (tile-first, distance- and backdrop-invariant):
+//   The board is the LIGHTEST surface on the screen, and it's a 4x4 grid of
+//   bright tiles carrying near-black letter ink. Threshold for the light
+//   pixels, close letter-pinholes into one blob per board, and take the
+//   largest quad-shaped contour at a plausible board size. A dark-ink
+//   density check inside the winning quad rejects bright walls and UI
+//   chips. Board size never enters the decision beyond sanity floors, so
+//   the phone can sit at any distance.
 import type { Tile } from "~/utils/solver";
 
 // ---------------------------------------------------------------
@@ -27,100 +20,172 @@ import type { Tile } from "~/utils/solver";
 export const WORK_WIDTH = 640;
 export const WARP_SIZE = 700;
 
-// A 4-point contour must be at least this side length (working-frame px) to
-// warp into OCR-able cells. ~one tile side at 640px width is the floor.
-export const MIN_SIDE_PX = 70;
+// Grayscale gates. Tiles are the LIGHTEST surface on screen; letters are
+// near-black. These are generous on purpose, the geometry checks do the
+// real disambiguation.
+export const INK_MAX = 100;
+export const TILE_MIN = 150;
 
-// Blue mask thresholds (RGB). The board backing is a saturated blue well
-// above the red channel; white tiles, skin, and the phone's background UI
-// all fail B > R + 40 or the saturation floor.
-export function isBoardBlue(r: number, g: number, b: number): boolean {
-  return b > 110 && b > r + 40 && b > g + 15;
-}
+type Pt = { x: number; y: number };
 
-/** Build an 8-bit mask of blue pixels from a 3- or 4-channel cv.Mat. */
-export function buildBlueMask(cv: Record<string, any>, src: any): any {
-  const channels = src.channels();
-  const w = src.cols;
-  const h = src.rows;
-  const data = src.data as Uint8Array;
-  const out = new Uint8Array(w * h);
-  for (let i = 0, j = 0; j < out.length; i += channels, j++) {
-    out[j] = isBoardBlue(data[i]!, data[i + 1]!, data[i + 2]!) ? 255 : 0;
-  }
-  const mask = cv.matFromArray(h, w, cv.CV_8UC1, out);
-  // Close gaps (white tiles punching holes in the blue sheet). No open:
-  // erosion shrinks small boards below the side floor, and speck rejection
-  // is already handled by the area floor + largest-first ranking.
-  const k = cv.getStructuringElement(cv.MORPH_RECT, new cv.Size(5, 5));
-  const closed = new cv.Mat();
-  cv.morphologyEx(mask, closed, cv.MORPH_CLOSE, k);
-  mask.delete();
-  k.delete();
-  return closed;
-}
+// Morphological close kernel side, as a fraction of the short frame edge.
+// Sized to merge the pinholes dark letters punch into the bright-tile mask
+// without bridging across to background elements.
+const CLOSE_FRAC = 0.03;
 
 /**
- * Ranked candidate board quads from a blue mask, biggest first, in the
- * mask's coordinate space. Caller owns the returned Mat-free plain data;
- * the mask Mat is deleted by the caller.
+ * Detect the board quad from a working-frame RGB Mat, or null.
+ *
+ * The board is the LIGHTEST region of the screen and carries near-black
+ * letter ink. Threshold for light pixels, close letter holes so each tile
+ * block merges into one bright blob, then find the largest quad-shaped
+ * contour at a plausible board size. Distractors (the phone's light UI
+ * buttons, a wall, a window) fail either the quad check or the ink-density
+ * verification inside the winning region.
  */
-export function findBoardQuads(
+export function detectQuadFromTiles(
   cv: Record<string, any>,
-  mask: any,
-): Array<Array<{ x: number; y: number }>> {
+  src: any,
+): Array<Pt> | null {
+  const gray = new cv.Mat();
+  cv.cvtColor(src, gray, cv.COLOR_RGB2GRAY);
+  const W = src.cols;
+  const H = src.rows;
+  const total = W * H;
+
+  // --- Bright-tile mask ---------------------------------------------------
+  // Small CLOSE to fill dark-letter pinholes in each bright tile so a tile
+  // stays one blob. No open: erodes far boards away.
+  const bright = new cv.Mat();
+  cv.threshold(gray, bright, TILE_MIN, 255, cv.THRESH_BINARY);
+  const closeK = Math.max(3, Math.round(Math.min(W, H) * CLOSE_FRAC) | 1);
+  const kernel = cv.getStructuringElement(cv.MORPH_ELLIPSE, new cv.Size(closeK, closeK));
+  const closed = new cv.Mat();
+  cv.morphologyEx(bright, closed, cv.MORPH_CLOSE, kernel);
+  bright.delete();
+  kernel.delete();
+
+  // --- Gather every bright blob of plausible tile/board size --------------
   const contours = new cv.MatVector();
   const hierarchy = new cv.Mat();
-  cv.findContours(mask, contours, hierarchy, cv.RETR_EXTERNAL, cv.CHAIN_APPROX_SIMPLE);
-  const frameArea = mask.cols * mask.rows;
-  const quads: Array<{ area: number; pts: Array<{ x: number; y: number }> }> = [];
+  cv.findContours(closed, contours, hierarchy, cv.RETR_EXTERNAL, cv.CHAIN_APPROX_SIMPLE);
 
+  const minBlobArea = Math.max(100, total * 0.001);
+  type Blob = { area: number; cx: number; cy: number; side: number; bx: number; by: number; bw: number; bh: number };
+  const blobs: Blob[] = [];
   for (let i = 0; i < contours.size(); i++) {
     const cnt = contours.get(i);
     const area = cv.contourArea(cnt);
-    const peri = cv.arcLength(cnt, true);
-    const approx = new cv.Mat();
-    // 0.04 epsilon: the board is a rounded rectangle, so raw approx may
-    // return 5-8 points. Hull then re-approximate forces a clean 4 points.
-    cv.approxPolyDP(cnt, approx, 0.04 * peri, true);
-
-    if (approx.rows >= 4 && approx.rows <= 8 && area > frameArea * 0.005) {
-      const hull = new cv.Mat();
-      cv.convexHull(approx, hull, false, true);
-      const quad = new cv.Mat();
-      // Scale the epsilon with contour size: 0.02*peri is 13px of tolerance
-      // on a 170px-side board, which rounds the quad inward ~20%. 0.005 keeps
-      // corner error under a pixel at every distance we accept.
-      cv.approxPolyDP(hull, quad, 0.005 * cv.arcLength(hull, true), true);
-      if (quad.rows === 4) {
-        const d = quad.data32S as Int32Array;
-        const pts = [
-          { x: d[0]!, y: d[1]! },
-          { x: d[2]!, y: d[3]! },
-          { x: d[4]!, y: d[5]! },
-          { x: d[6]!, y: d[7]! },
-        ];
-        pts.sort((a, b) => a.y - b.y);
-        const top = pts.slice(0, 2).sort((a, b) => a.x - b.x);
-        const bottom = pts.slice(2, 4).sort((a, b) => a.x - b.x);
-        const ordered = [top[0]!, top[1]!, bottom[1]!, bottom[0]!];
-        const side = Math.max(
-          Math.hypot(ordered[1]!.x - ordered[0]!.x, ordered[1]!.y - ordered[0]!.y),
-          Math.hypot(ordered[3]!.x - ordered[0]!.x, ordered[3]!.y - ordered[0]!.y),
-        );
-        if (side >= MIN_SIDE_PX)
-          quads.push({ area, pts: ordered });
-      }
-      quad.delete();
-      hull.delete();
+    if (area >= minBlobArea) {
+      const r = cv.boundingRect(cnt);
+      blobs.push({
+        area,
+        cx: r.x + r.width / 2,
+        cy: r.y + r.height / 2,
+        side: Math.sqrt(area),
+        bx: r.x,
+        by: r.y,
+        bw: r.width,
+        bh: r.height,
+      });
+      r.delete?.();
     }
-    approx.delete();
     cnt.delete();
   }
   contours.delete();
   hierarchy.delete();
-  quads.sort((a, b) => b.area - a.area);
-  return quads.slice(0, 4).map(q => q.pts);
+  closed.delete();
+
+  if (!blobs.length) {
+    gray.delete();
+    return null;
+  }
+
+  // --- Union blobs that cluster in a board-sized neighborhood ------------
+  // Tiles are separated by gap rows/columns the CLOSE kernel could not
+  // bridge (extreme close range, thin gaps). Single-shot reach from the
+  // seed fails when the seed ends up central and only some tiles fit its
+  // radius. Flood-fill instead: start from the seed, absorb every blob
+  // inside reach of ANY current member, and let the cluster's pitch
+  // estimate tighten as tiles accumulate. The cluster settles when no
+  // new blob joins. Tiles occupy ~86% of cell pitch, so center-to-center
+  // distance between adjacent tiles is side/0.86; reach of 1.3 pitches
+  // from any member catches an adjacent tile while staying well under
+  // 2 pitches (a non-board bright object more than a full tile-gap away
+  // can never join).
+  blobs.sort((a, b) => b.area - a.area);
+  const seed = blobs[0]!;
+  const members: Blob[] = [seed];
+  const used = new Set<Blob>([seed]);
+  // Iteratively expand; the cluster's pitch estimate shrinks toward the
+  // real one as tile geometry accumulates, which only tightens the gate.
+  while (true) {
+    const pitchEst = Math.max(...members.map(m => m.side)) / 0.86;
+    const reach = pitchEst * 1.3;
+    let grew = false;
+    for (const b of blobs) {
+      if (used.has(b))
+        continue;
+      if (members.some(m => Math.abs(b.cx - m.cx) <= reach && Math.abs(b.cy - m.cy) <= reach)) {
+        members.push(b);
+        used.add(b);
+        grew = true;
+      }
+    }
+    if (!grew)
+      break;
+  }
+  if (typeof process !== "undefined" && (process as { env?: Record<string, string> }).env?.DEBUG_DQFT)
+    console.error(`[dqft] blobs=${blobs.length} seed=(${seed.cx.toFixed(0)},${seed.cy.toFixed(0)}) side=${seed.side.toFixed(1)} members=${members.length} boxes=[${members.slice(0, 4).map(b => `${b.bx},${b.by},${b.bw}x${b.bh}`).join(" | ")}]`);
+
+  // Board bbox from member blob bounding rects.
+  const bx0 = Math.min(...members.map(b => b.bx));
+  const by0 = Math.min(...members.map(b => b.by));
+  const bx1 = Math.max(...members.map(b => b.bx + b.bw));
+  const by1 = Math.max(...members.map(b => b.by + b.bh));
+  const boardW = bx1 - bx0;
+  const boardH = by1 - by0;
+
+  // Squareness + size sanity.
+  const minS = Math.min(boardW, boardH);
+  const maxS = Math.max(boardW, boardH);
+  if (maxS < 50 || maxS > minS * 2 || boardW * boardH < total * 0.005) {
+    gray.delete();
+    return null;
+  }
+
+  // --- Ink verification ---------------------------------------------------
+  // Letters cover 1-5% of the board, gaps another 2-4%. Bright walls /
+  // UI chips / windows carry ~0% ink inside the union bbox.
+  const ix0 = Math.max(0, bx0);
+  const iy0 = Math.max(0, by0);
+  const ix1 = Math.min(W, bx1);
+  const iy1 = Math.min(H, by1);
+  const roiRect = new cv.Rect(ix0, iy0, ix1 - ix0, iy1 - iy0);
+  const roi = gray.roi(roiRect);
+  const ink = new cv.Mat();
+  cv.threshold(roi, ink, INK_MAX, 255, cv.THRESH_BINARY_INV);
+  roi.delete();
+  roiRect.delete?.();
+  const inkCount = cv.countNonZero(ink);
+  ink.delete();
+  const quadArea = (ix1 - ix0) * (iy1 - iy0);
+  const inkFrac = inkCount / Math.max(1, quadArea);
+  if (inkFrac < 0.004 || inkFrac > 0.3) {
+    gray.delete();
+    return null;
+  }
+
+  // --- Quad corners --------------------------------------------------------
+  // Union bbox corners, no padding: the bbox of merged member tiles already
+  // spans tile outer edges, and at extreme close range the board can extend
+  // past the frame edge so clamping is the only safe pad.
+  const tl = { x: Math.max(0, bx0), y: Math.max(0, by0) };
+  const tr = { x: Math.min(W - 1, bx1), y: Math.max(0, by0) };
+  const br = { x: Math.min(W - 1, bx1), y: Math.min(H - 1, by1) };
+  const bl = { x: Math.max(0, bx0), y: Math.min(H - 1, by1) };
+  void gray;
+  return [tl, tr, br, bl];
 }
 
 // ---------------------------------------------------------------
@@ -136,7 +201,6 @@ export async function getCv() {
   if (!cvLoading) {
     cvLoading = import("@techstark/opencv-js").then(async (mod) => {
       const m = (mod as { default?: unknown }).default ?? mod;
-      // opencv-js exports a promise-like; await to reach the real namespace.
       return (m && typeof (m as Promise<unknown>).then === "function") ? await m : m;
     });
   }
@@ -187,73 +251,71 @@ export function useOcr() {
       work.height = workH;
       work.getContext("2d")!.drawImage(source, 0, 0, WORK_WIDTH, workH);
 
-      const src = cv.imread(work);
-      const mask = buildBlueMask(cv, src);
-      const quads = findBoardQuads(cv, mask);
-      mask.delete();
+      const src = cv.imread(work); // RGBA
+      // detectQuadFromTiles expects 3-channel RGB; convert once here.
+      const rgb = new cv.Mat();
+      cv.cvtColor(src, rgb, cv.COLOR_RGBA2RGB);
+      src.delete();
 
-      if (!quads.length) {
-        src.delete();
+      const quad = detectQuadFromTiles(cv, rgb);
+      if (!quad) {
+        rgb.delete();
         return null;
       }
 
-      // Grayscale once; every candidate warps from the same source.
+      // Warp from the WORKING-frame quads; interpolation chosen by whether
+      // the board is being upscaled (far) or downscaled (close).
+      const srcSide = Math.hypot(quad[1]!.x - quad[0]!.x, quad[1]!.y - quad[0]!.y);
+      const dst = new cv.Mat();
+      const srcTri = cv.matFromArray(4, 1, cv.CV_32FC2, quad.flatMap(p => [p.x, p.y]));
+      const dstTri = cv.matFromArray(4, 1, cv.CV_32FC2, [
+        0,
+        0,
+        WARP_SIZE,
+        0,
+        WARP_SIZE,
+        WARP_SIZE,
+        0,
+        WARP_SIZE,
+      ]);
+      const M = cv.getPerspectiveTransform(srcTri, dstTri);
+      const interp = srcSide < WARP_SIZE ? cv.INTER_CUBIC : cv.INTER_AREA;
+      // Grayscale warp for the OCR stage
       const gray = new cv.Mat();
-      cv.cvtColor(src, gray, cv.COLOR_RGBA2GRAY);
-      src.delete();
-
-      for (const pts of quads) {
-        const dst = new cv.Mat();
-        const srcTri = cv.matFromArray(4, 1, cv.CV_32FC2, pts.flatMap(p => [p.x, p.y]));
-        const dstTri = cv.matFromArray(4, 1, cv.CV_32FC2, [
-          0,
-          0,
-          WARP_SIZE,
-          0,
-          WARP_SIZE,
-          WARP_SIZE,
-          0,
-          WARP_SIZE,
-        ]);
-        const M = cv.getPerspectiveTransform(srcTri, dstTri);
-        const srcSide = Math.hypot(pts[1]!.x - pts[0]!.x, pts[1]!.y - pts[0]!.y);
-        const interp = srcSide < WARP_SIZE ? cv.INTER_CUBIC : cv.INTER_AREA;
-        cv.warpPerspective(gray, dst, M, new cv.Size(WARP_SIZE, WARP_SIZE), interp);
-        srcTri.delete();
-        dstTri.delete();
-        M.delete();
-
-        const cellSize = WARP_SIZE / 4;
-        const tiles: Tile[][] = [];
-        let lettersRead = 0;
-        let darkCells = 0;
-        for (let r = 0; r < 4; r++) {
-          const rowTiles: Tile[] = [];
-          for (let c = 0; c < 4; c++) {
-            const cell = await extractCellLetter(cv, dst, r, c, cellSize);
-            if (cell.letter)
-              lettersRead++;
-            if (cell.dark)
-              darkCells++;
-            rowTiles.push({ letter: cell.letter, row: r, col: c });
-          }
-          tiles.push(rowTiles);
-        }
-        dst.delete();
-        const inkCoverage = darkCells / 16;
-
-        // Accept this candidate when enough cells read as letters. A wrong
-        // quad (blue UI panel, sign) reads ~0 and we fall through to the
-        // next candidate instead of poisoning board state.
-        if (lettersRead >= 6) {
-          const corners = pts.map(p => ({ x: p.x / scale, y: p.y / scale }));
-          gray.delete();
-          return { tiles, corners, readRatio: lettersRead / 16, inkCoverage };
-        }
-      }
-
+      cv.cvtColor(rgb, gray, cv.COLOR_RGB2GRAY);
+      rgb.delete();
+      cv.warpPerspective(gray, dst, M, new cv.Size(WARP_SIZE, WARP_SIZE), interp);
       gray.delete();
-      return null;
+      srcTri.delete();
+      dstTri.delete();
+      M.delete();
+
+      const cellSize = WARP_SIZE / 4;
+      const tiles: Tile[][] = [];
+      let lettersRead = 0;
+      let darkCells = 0;
+      for (let r = 0; r < 4; r++) {
+        const rowTiles: Tile[] = [];
+        for (let c = 0; c < 4; c++) {
+          const cell = await extractCellLetter(cv, dst, r, c, cellSize);
+          if (cell.letter)
+            lettersRead++;
+          if (cell.dark)
+            darkCells++;
+          rowTiles.push({ letter: cell.letter, row: r, col: c });
+        }
+        tiles.push(rowTiles);
+      }
+      dst.delete();
+      const inkCoverage = darkCells / 16;
+
+      // Accept only if enough cells actually OCR; a grid-shaped cluster of
+      // punctuation/UI marks would fail here.
+      if (lettersRead < 6)
+        return null;
+
+      const corners = quad.map(p => ({ x: p.x / scale, y: p.y / scale }));
+      return { tiles, corners, readRatio: lettersRead / 16, inkCoverage };
     }
     catch (e: unknown) {
       error.value = e instanceof Error ? e.message : String(e);
