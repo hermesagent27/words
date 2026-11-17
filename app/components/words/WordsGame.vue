@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import type { GravityResult, ScoredWord, Tile } from "~/utils/solver";
 
-import { applyGravity, bestDisjointWord, solveBoard } from "~/utils/solver";
+import { applyGravity, solveBoard } from "~/utils/solver";
 
 const { trie, load: loadWords } = useWordList();
 const { videoEl, canvasEl, ready: cameraReady, error: cameraError, start: startCamera, stop: stopCamera, switchCamera, captureFrame } = useCamera();
@@ -29,40 +29,66 @@ const statusLine = ref("Starting…");
 // tells the app which word they actually played by tapping it (defaults
 // to the top suggestion). The selection drives:
 //   1) the red overlay path,
-//   2) the best disjoint companion word (cyan overlay),
-//   3) the gravity simulation for cell locking + guaranteed next word.
+//   2) the gravity simulation for cell locking + guaranteed next word.
 // ---------------------------------------------------------------------
 const selectedWord = ref<ScoredWord | null>(null);
-const secondWord = ref<ScoredWord | null>(null);
 const gravity = ref<GravityResult | null>(null);
 const guaranteedNext = ref<ScoredWord[]>([]);
+
+// ---------------------------------------------------------------------
+// Free TTS via the browser's SpeechSynthesis API. The first utterance on
+// iOS Safari must come from a user gesture, so we unlock the engine on the
+// first tap anywhere; after that every newly-found word is spoken aloud.
+// ---------------------------------------------------------------------
+let ttsUnlocked = false;
+let lastSpoken = "";
+function unlockTts() {
+  if (ttsUnlocked || typeof window === "undefined" || !window.speechSynthesis)
+    return;
+  ttsUnlocked = true;
+  // Prime the engine with a silent utterance inside a real user gesture.
+  const u = new SpeechSynthesisUtterance(" ");
+  u.volume = 0;
+  window.speechSynthesis.speak(u);
+}
+if (typeof window !== "undefined")
+  window.addEventListener("pointerdown", unlockTts, { once: false });
+
+function speakWord(word: string) {
+  if (!ttsUnlocked || typeof window === "undefined" || !window.speechSynthesis)
+    return;
+  if (word === lastSpoken)
+    return;
+  lastSpoken = word;
+  window.speechSynthesis.cancel(); // never queue, always say the latest
+  const u = new SpeechSynthesisUtterance(word);
+  u.rate = 1.1;
+  u.pitch = 1.0;
+  window.speechSynthesis.speak(u);
+}
 
 // ---------------------------------------------------------------------
 // Per-cell state machine. Each cell has:
 //   - a live consensus vote (candidate/committed/missCount), and
 //   - an expected letter + lock state driven by the game history.
 //
-// Locking rule (Tristan's pick): after a word is played, cells whose
-// letter did NOT change position or value are locked. They are exempt
-// from re-voting, miss counting, and quick-clear wiping. Fallen and
-// newly spawned cells carry an `expected` letter (fallen: known letter
-// from above; spawned: ''), and a mismatched read immediately unlocks
-// them (fall tile OCR'd wrong, game reshuffled, etc).
+// Single-frame commit (fastest iteration): a confident read commits
+// immediately. Misreads self-correct on the next frame because the new
+// read replaces the old candidate, and locked cells unlock the instant
+// the camera contradicts them.
 // ---------------------------------------------------------------------
-const CONSENSUS_FRAMES = 2;
-const MISS_TOLERANCE = 3;
+const MISS_TOLERANCE = 2;
 const QUICK_CLEAR_MISSES = 2;
 const QUICK_CLEAR_RATIO = 0.5;
 type CellState = {
   candidate: string;
-  candidateCount: number;
   committed: string;
   missCount: number;
   locked: boolean;
   expected: string;
 };
 function freshCell(): CellState {
-  return { candidate: "", candidateCount: 0, committed: "", missCount: 0, locked: false, expected: "" };
+  return { candidate: "", committed: "", missCount: 0, locked: false, expected: "" };
 }
 const cellState: CellState[][] = Array.from({ length: 4 }, () =>
   Array.from({ length: 4 }, () => freshCell()));
@@ -72,11 +98,13 @@ function resetCellStates() {
     for (let c = 0; c < 4; c++)
       cellState[r]![c] = freshCell();
   }
+  lastSpoken = "";
 }
 
-// Vote a new read into an unlocked cell; unlock on contradiction with the
-// expected letter. Returns the committed letter (or '' if none yet).
-function voteCell(r: number, c: number, read: string): string {
+// Commit a new read into an unlocked cell; unlock on contradiction with
+// the expected letter. Single-frame commit keeps time-to-first-word at
+// one scan tick.
+function voteCell(r: number, c: number, read: string) {
   const s = cellState[r]![c]!;
   if (s.expected && read && read !== s.expected) {
     // Reality disagrees with the simulated game state: trust the camera.
@@ -84,33 +112,25 @@ function voteCell(r: number, c: number, read: string): string {
     s.expected = "";
     s.committed = "";
     s.candidate = read;
-    s.candidateCount = 1;
     s.missCount = 0;
+    return;
   }
   if (read === "") {
-    s.candidate = "";
-    s.candidateCount = 0;
     s.missCount++;
     if (s.missCount >= MISS_TOLERANCE) {
       s.committed = "";
+      s.candidate = "";
       s.missCount = 0;
     }
-    return s.committed;
+    return;
   }
   s.missCount = 0;
-  if (s.candidate === read) {
-    s.candidateCount++;
-  }
-  else {
-    s.candidate = read;
-    s.candidateCount = 1;
-  }
-  if (s.candidateCount >= CONSENSUS_FRAMES && s.committed !== s.candidate)
-    s.committed = s.candidate;
-  return s.committed;
+  s.candidate = read;
+  if (s.committed !== read)
+    s.committed = read;
 }
 
-const SCAN_INTERVAL_MS = 700;
+const SCAN_INTERVAL_MS = 500;
 let scanTimer: ReturnType<typeof setInterval> | null = null;
 // True only when the current frame shows a real, settled board. Gates both
 // the path drawing and the word card so stale results never linger while
@@ -133,7 +153,6 @@ function pathPoints(w: ScoredWord | null): Array<{ x: number; y: number }> {
 }
 
 const bestPath = computed(() => pathPoints(selectedWord.value));
-const secondPath = computed(() => pathPoints(secondWord.value));
 
 onMounted(async () => {
   await loadWords();
@@ -144,6 +163,8 @@ onMounted(async () => {
 onUnmounted(() => {
   stopScanning();
   stopCamera();
+  if (typeof window !== "undefined" && window.speechSynthesis)
+    window.speechSynthesis.cancel();
 });
 
 function startScanning() {
@@ -177,9 +198,8 @@ async function scanTick() {
   const committedTiles: (Tile | null)[][] = [];
   let readCount = 0;
 
-  // Pass 1: vote every UNLOCKED cell. Locked cells skip the vote entirely
-  // (their letter survived the last play untouched, so the only way they
-  // change is a contradiction unlock) and never accumulate misses.
+  // Vote every UNLOCKED cell. Locked cells skip the vote (their letter
+  // survived the last play untouched) and never accumulate misses.
   for (let r = 0; r < 4; r++) {
     for (let c = 0; c < 4; c++) {
       const s = cellState[r]![c]!;
@@ -192,20 +212,17 @@ async function scanTick() {
     }
   }
 
-  // Pass 2: promote expected letters and assemble the committed board.
+  // Promote expected letters and assemble the committed board.
   for (let r = 0; r < 4; r++) {
     const rowTiles: (Tile | null)[] = [];
     for (let c = 0; c < 4; c++) {
       const s = cellState[r]![c]!;
-      // A fallen cell's letter is already known; commit it as soon as the
-      // camera agrees (or immediately while it is still mid-fall blank).
       if (!s.locked && s.expected && (!s.committed || s.committed !== s.expected)
-        && (s.committed === s.expected || s.missCount >= 1 || s.candidate === s.expected)) {
+        && (s.candidate === s.expected || s.missCount >= 1)) {
         s.committed = s.expected;
         s.expected = "";
         s.locked = true;
         s.candidate = "";
-        s.candidateCount = 0;
         s.missCount = 0;
       }
       rowTiles.push(s.committed ? { letter: s.committed, row: r, col: c } : null);
@@ -213,9 +230,7 @@ async function scanTick() {
     committedTiles.push(rowTiles);
   }
 
-  // Quick-clear bail, counting only unlocked cells: a board mid-change has
-  // most unlocked cells blank for 2 straight frames. Locked cells are
-  // excluded so their stability never masks a wipe of the changing region.
+  // Quick-clear bail: a board mid-change has most unlocked cells blank.
   let unlocked = 0;
   let unlockedMissing = 0;
   let recentlyMissed = 0;
@@ -240,8 +255,8 @@ async function scanTick() {
 
   boardVisible.value = true;
 
-  // Signature over the committed board (nulls as blanks); stable-board
-  // frames only refresh the overlay geometry.
+  // Signature over the committed board; stable frames only refresh the
+  // overlay geometry.
   const sig = committedTiles.flat().map(t => t?.letter || "").join("|");
   if (sig === lastSignature.value) {
     detection.value = { corners: result.corners };
@@ -260,8 +275,6 @@ async function scanTick() {
 /**
  * Hide the stale word + path immediately; per-cell letters stay committed
  * so a settled board re-locks instantly without re-voting every cell.
- * Game-history predictions (expected/locked) are kept too: a transient
- * board-out-of-frame should not discard what we know about the fall.
  */
 function clearBoardDisplay(reason: string) {
   detection.value = null;
@@ -279,6 +292,7 @@ function clearBoardDisplay(reason: string) {
 function playWord(w: ScoredWord) {
   if (!tiles.value)
     return;
+  speakWord(w.word); // user gesture context: also unlocks TTS reliably
   const g = applyGravity(tiles.value, w.path);
   gravity.value = g;
   for (const p of g.stable) {
@@ -292,7 +306,6 @@ function playWord(w: ScoredWord) {
     s.expected = g.board[p.row]![p.col]!.letter;
     s.committed = "";
     s.candidate = "";
-    s.candidateCount = 0;
     s.missCount = 0;
   }
   for (const p of g.spawned) {
@@ -301,14 +314,12 @@ function playWord(w: ScoredWord) {
     s.expected = "";
     s.committed = "";
     s.candidate = "";
-    s.candidateCount = 0;
     s.missCount = 0;
   }
   // Force the next scan to re-solve against the post-play board instead of
   // matching the pre-play signature.
   lastSignature.value = "";
-  // Guaranteed next word: known letters only (stable + fallen), no guesses
-  // about what spawns on top.
+  // Guaranteed next word: known letters only (stable + fallen).
   if (trie.value) {
     const known = solveBoard(g.board, trie.value);
     guaranteedNext.value = known.slice(0, 3);
@@ -330,18 +341,14 @@ function solveCurrent() {
   const top = allWords.value.length ? allWords.value[0]! : null;
   // Keep the user's tapped word selected while it is still on the board;
   // otherwise fall back to the top suggestion.
-  if (selectedWord.value && allWords.value.some(w => w.word === selectedWord.value!.word)) {
+  if (selectedWord.value && allWords.value.some(w => w.word === selectedWord.value!.word))
     selectedWord.value = allWords.value.find(w => w.word === selectedWord.value!.word)!;
-  }
-  else {
+  else
     selectedWord.value = top;
-  }
-  secondWord.value = selectedWord.value ? bestDisjointWord(allWords.value, selectedWord.value) : null;
+  // Speak the word at the top of the list whenever it changes.
+  if (top && top.word !== lastSpoken)
+    speakWord(top.word);
 }
-
-watch(selectedWord, (w) => {
-  secondWord.value = w ? bestDisjointWord(allWords.value, w) : null;
-});
 
 // Pause scanning when tab hidden to save battery
 if (typeof document !== "undefined") {
@@ -405,9 +412,8 @@ if (typeof document !== "undefined") {
       />
       <canvas ref="canvasEl" class="hidden" />
 
-      <!-- Overlay: board outline + selected word (red) + disjoint companion
-           word (cyan). boardVisible gates the drawing so it disappears the
-           moment the board leaves the frame. -->
+      <!-- Overlay: board outline + selected word path. boardVisible gates
+           the drawing so it disappears the moment the board leaves frame. -->
       <svg
         v-if="detection"
         class="absolute inset-0 w-full h-full pointer-events-none"
@@ -422,16 +428,6 @@ if (typeof document !== "undefined") {
           opacity="0.7"
         />
         <template v-if="boardVisible">
-          <polyline
-            v-if="secondPath.length > 1"
-            :points="secondPath.map(p => `${p.x},${p.y}`).join(' ')"
-            fill="none"
-            stroke="cyan"
-            stroke-width="10"
-            stroke-linecap="round"
-            stroke-linejoin="round"
-            opacity="0.75"
-          />
           <polyline
             v-if="bestPath.length > 1"
             :points="bestPath.map(p => `${p.x},${p.y}`).join(' ')"
@@ -474,12 +470,8 @@ if (typeof document !== "undefined") {
           Played it
         </button>
       </div>
-      <div v-if="secondWord" class="flex items-baseline gap-2 mt-1">
-        <span class="text-xl font-semibold tracking-wider text-info">{{ secondWord.word.toUpperCase() }}</span>
-        <span class="text-sm text-base-content/70">{{ secondWord.score }} pts — also playable, no shared tiles</span>
-      </div>
       <div
-        v-for="w in allWords.slice(0, 6).filter(x => x.word !== selectedWord?.word && x.word !== secondWord?.word)"
+        v-for="w in allWords.slice(0, 6).filter(x => x.word !== selectedWord?.word)"
         :key="w.word"
         class="flex items-baseline gap-2 mt-1 opacity-80"
       >
@@ -521,7 +513,7 @@ if (typeof document !== "undefined") {
             v-for="w in allWords.slice(0, 50)"
             :key="w.word"
             class="flex justify-between text-sm py-1 border-b border-base-300"
-            :class="{ 'font-bold text-error': w.word === selectedWord?.word, 'font-bold text-info': w.word === secondWord?.word }"
+            :class="{ 'font-bold text-error': w.word === selectedWord?.word }"
           >
             <span class="uppercase">{{ w.word }}</span>
             <span>{{ w.score }}</span>
