@@ -38,7 +38,13 @@
     "typescript": "^5.9.3"
   },
   "lint-staged": {
-    "*.{js,ts,vue,mjs,cjs,json,md,css,html,yaml,yml}": [
+    "app/**/*.{js,ts,vue,mjs,cjs,css,html}": [
+      "eslint --fix"
+    ],
+    "server/**/*.ts": [
+      "eslint --fix"
+    ],
+    "*.{js,ts,mjs,cjs,json,md,css,html,yaml,yml}": [
       "eslint --fix"
     ]
   }
