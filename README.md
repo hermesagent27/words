@@ -10,6 +10,10 @@ every cell on that path has a different readable letter in two consecutive
 unobstructed scans. Use **Played it** if a new or falling tile has the same
 letter as before. Use **Use next word** or tap a backup before playing it.
 
+For per-cell OCR, the selected letter component is cropped before white
+padding is added, then binarized. This keeps scoring dots below the letter out
+of the padded image. Dots touching the letter may still be included.
+
 After a play, unused tiles keep their order as they fall. Their letters are
 locked at the predicted positions, and OCR reads the new cells at the top.
 The scanner also reads the selected word's path to detect the next play.

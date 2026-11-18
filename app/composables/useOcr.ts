@@ -351,7 +351,7 @@ export function useOcr() {
    *   2. Otsu threshold: ink (dark) -> white blobs on black background.
    *   3. Keep only components near the cell center with plausible letter size.
    *      This drops the dots (tiny, low in the cell) and edge fragments.
-   *   4. OCR the letter crop with PSM 10; require minimum confidence.
+   *   4. Crop the letter, add white padding, and binarize for OCR.
    */
   async function extractCellLetter(
     cv: Record<string, any>,
@@ -437,26 +437,29 @@ export function useOcr() {
       return { letter: "", dark };
     }
 
-    // Crop the ink blob from the warped grayscale with padding, then OCR.
+    // Crop to the component bounds before adding white padding. Cropping
+    // padded grayscale directly can include score dots below the letter.
     const pad = Math.floor(inner * 0.1);
-    const bx = Math.max(0, col * cellSize + inset + best.x - pad);
-    const by = Math.max(0, row * cellSize + inset + best.y - pad);
-    const bw = Math.min(warped.cols - bx, best.w + pad * 2);
-    const bh = Math.min(warped.rows - by, best.h + pad * 2);
-    const blobRect = new cv.Rect(bx, by, bw, bh);
+    const bx = col * cellSize + inset + best.x;
+    const by = row * cellSize + inset + best.y;
+    const blobRect = new cv.Rect(bx, by, best.w, best.h);
     const blob = warped.roi(blobRect);
+    const padded = new cv.Mat();
+    cv.copyMakeBorder(blob, padded, pad, pad, pad, pad, cv.BORDER_CONSTANT, new cv.Scalar(255, 255, 255, 255));
 
     // Upscale ~3x for Tesseract, which prefers ~30px+ glyphs.
     const scaled = new cv.Mat();
-    cv.resize(blob, scaled, new cv.Size(bw * 3, bh * 3), 0, 0, cv.INTER_CUBIC);
+    cv.resize(padded, scaled, new cv.Size(padded.cols * 3, padded.rows * 3), 0, 0, cv.INTER_CUBIC);
+    cv.threshold(scaled, scaled, 0, 255, cv.THRESH_BINARY | cv.THRESH_OTSU);
 
     const canvas = document.createElement("canvas");
-    canvas.width = bw * 3;
-    canvas.height = bh * 3;
+    canvas.width = scaled.cols;
+    canvas.height = scaled.rows;
     cv.imshow(canvas, scaled);
 
     blob.delete();
     blobRect.delete?.();
+    padded.delete();
     scaled.delete();
     labels.delete();
     stats.delete();
