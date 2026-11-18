@@ -1,7 +1,6 @@
 {
   "name": "words",
   "type": "module",
-  "version": "0.2.0",
   "private": true,
   "scripts": {
     "build": "nuxt build",
@@ -36,17 +35,10 @@
     "eslint-plugin-format": "^1.2.0",
     "husky": "^9.1.7",
     "lint-staged": "^16.2.7",
-    "sharp": "^0.35.5",
     "typescript": "^5.9.3"
   },
   "lint-staged": {
-    "app/**/*.{js,ts,vue,mjs,cjs,css,html}": [
-      "eslint --fix"
-    ],
-    "server/**/*.ts": [
-      "eslint --fix"
-    ],
-    "*.{js,ts,mjs,cjs,json,md,css,html,yaml,yml}": [
+    "*.{js,ts,vue,mjs,cjs,json,md,css,html,yaml,yml}": [
       "eslint --fix"
     ]
   }

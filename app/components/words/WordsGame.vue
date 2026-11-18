@@ -1,12 +1,11 @@
 <script setup lang="ts">
-import type { GravityResult, ScoredWord, Tile } from "~/utils/solver";
+import type { ScoredWord, Tile } from "~/utils/solver";
 
-import { applyGravity, solveBoard } from "~/utils/solver";
+import { solveBoard } from "~/utils/solver";
 
 const { trie, load: loadWords } = useWordList();
 const { videoEl, canvasEl, ready: cameraReady, error: cameraError, start: startCamera, stop: stopCamera, switchCamera, captureFrame } = useCamera();
 const { processing, detectGrid } = useOcr();
-const { public: { appVersion } } = useRuntimeConfig();
 
 const manualMode = ref(false);
 const manualTiles = ref<Tile[][]>(
@@ -20,130 +19,71 @@ function manualTileAt(i: number): Tile {
 
 const scanning = ref(false);
 const detection = ref<{ corners: Array<{ x: number; y: number }> } | null>(null);
-const tiles = ref<(Tile | null)[][] | null>(null);
+const tiles = ref<Tile[][] | null>(null);
 const allWords = ref<ScoredWord[]>([]);
+const bestWord = ref<ScoredWord | null>(null);
 const lastSignature = ref<string>("");
 const statusLine = ref("Starting…");
 
-// ---------------------------------------------------------------------
-// Played-word selection. The camera never sees the tap, so the user
-// tells the app which word they actually played by tapping it (defaults
-// to the top suggestion). The selection drives:
-//   1) the red overlay path,
-//   2) the gravity simulation for cell locking + guaranteed next word.
-// ---------------------------------------------------------------------
-const selectedWord = ref<ScoredWord | null>(null);
-const gravity = ref<GravityResult | null>(null);
-const guaranteedNext = ref<ScoredWord[]>([]);
-
-// ---------------------------------------------------------------------
-// Free TTS via the browser's SpeechSynthesis API. The first utterance on
-// iOS Safari must come from a user gesture, so we unlock the engine on the
-// first tap anywhere; after that every newly-found word is spoken aloud.
-// ---------------------------------------------------------------------
-let ttsUnlocked = false;
-let lastSpoken = "";
-function unlockTts() {
-  if (ttsUnlocked || typeof window === "undefined" || !window.speechSynthesis)
-    return;
-  ttsUnlocked = true;
-  // Prime the engine with a silent utterance inside a real user gesture.
-  const u = new SpeechSynthesisUtterance(" ");
-  u.volume = 0;
-  window.speechSynthesis.speak(u);
-}
-if (typeof window !== "undefined")
-  window.addEventListener("pointerdown", unlockTts, { once: false });
-
-function speakWord(word: string) {
-  if (!ttsUnlocked || typeof window === "undefined" || !window.speechSynthesis)
-    return;
-  if (word === lastSpoken)
-    return;
-  lastSpoken = word;
-  window.speechSynthesis.cancel(); // never queue, always say the latest
-  const u = new SpeechSynthesisUtterance(word);
-  u.rate = 1.1;
-  u.pitch = 1.0;
-  window.speechSynthesis.speak(u);
-}
-
-// ---------------------------------------------------------------------
-// Per-cell state machine. Each cell has:
-//   - a live consensus vote (candidate/committed/missCount), and
-//   - an expected letter + lock state driven by the game history.
-//
-// Single-frame commit (fastest iteration): a confident read commits
-// immediately. Misreads self-correct on the next frame because the new
-// read replaces the old candidate, and locked cells unlock the instant
-// the camera contradicts them.
-// ---------------------------------------------------------------------
-const MISS_TOLERANCE = 2;
+// Per-cell consensus voting. Each cell has a candidate letter (latest read)
+// and a stable letter (committed). A letter is only committed after
+// CONSENSUS_FRAMES consecutive scans agree. Blurry/glare frames that read
+// '' or the wrong letter don't drop the committed letter immediately; we
+// tolerate up to MISS_TOLERANCE misses before clearing it.
+// This stops the constant flicker/rescan of single cells under glare.
+const CONSENSUS_FRAMES = 2;
+const MISS_TOLERANCE = 3;
+// Faster than the old 3-miss tolerance: while a game is loading or solving
+// for another word, most cells fail to read for 2 consecutive frames. That
+// is the signal to wipe the old word + drawing immediately.
 const QUICK_CLEAR_MISSES = 2;
 const QUICK_CLEAR_RATIO = 0.5;
-type CellState = {
-  candidate: string;
-  committed: string;
-  missCount: number;
-  locked: boolean;
-  expected: string;
-};
-function freshCell(): CellState {
-  return { candidate: "", committed: "", missCount: 0, locked: false, expected: "" };
-}
+type CellState = { candidate: string; candidateCount: number; committed: string; missCount: number };
 const cellState: CellState[][] = Array.from({ length: 4 }, () =>
-  Array.from({ length: 4 }, () => freshCell()));
+  Array.from({ length: 4 }, () => ({ candidate: "", candidateCount: 0, committed: "", missCount: 0 })));
 
-function resetCellStates() {
-  for (let r = 0; r < 4; r++) {
-    for (let c = 0; c < 4; c++)
-      cellState[r]![c] = freshCell();
-  }
-  lastSpoken = "";
-}
-
-// Commit a new read into an unlocked cell; unlock on contradiction with
-// the expected letter. Single-frame commit keeps time-to-first-word at
-// one scan tick.
-function voteCell(r: number, c: number, read: string) {
+// Vote a new read into the cell. Returns the committed letter (or '' if none yet).
+function voteCell(r: number, c: number, read: string): string {
   const s = cellState[r]![c]!;
-  if (s.expected && read && read !== s.expected) {
-    // Reality disagrees with the simulated game state: trust the camera.
-    s.locked = false;
-    s.expected = "";
-    s.committed = "";
-    s.candidate = read;
-    s.missCount = 0;
-    return;
-  }
   if (read === "") {
+    s.candidate = "";
+    s.candidateCount = 0;
     s.missCount++;
+    // Tolerate transient blanks (glare, shake) before clearing the letter.
     if (s.missCount >= MISS_TOLERANCE) {
       s.committed = "";
-      s.candidate = "";
       s.missCount = 0;
     }
-    return;
+    return s.committed;
   }
   s.missCount = 0;
-  s.candidate = read;
-  if (s.committed !== read)
-    s.committed = read;
+  if (s.candidate === read) {
+    s.candidateCount++;
+  }
+  else {
+    s.candidate = read;
+    s.candidateCount = 1;
+  }
+  if (s.candidateCount >= CONSENSUS_FRAMES && s.committed !== s.candidate) {
+    s.committed = s.candidate;
+  }
+  return s.committed;
 }
 
-const SCAN_INTERVAL_MS = 500;
+const SCAN_INTERVAL_MS = 700;
 let scanTimer: ReturnType<typeof setInterval> | null = null;
 // True only when the current frame shows a real, settled board. Gates both
 // the path drawing and the word card so stale results never linger while
 // the game is loading a new board or solving a different word.
 const boardVisible = ref(false);
+const nextWords = computed(() => allWords.value.slice(1, 3));
 
-function pathPoints(w: ScoredWord | null): Array<{ x: number; y: number }> {
-  if (!w || !detection.value || !canvasEl.value)
+const bestPath = computed(() => {
+  if (!bestWord.value || !detection.value || !canvasEl.value)
     return [];
   const c = detection.value.corners;
   const path: Array<{ x: number; y: number }> = [];
-  for (const step of w.path) {
+  for (const step of bestWord.value.path) {
     const u = (step.col + 0.5) / 4;
     const v = (step.row + 0.5) / 4;
     const x = (1 - u) * (1 - v) * c[0]!.x + u * (1 - v) * c[1]!.x + u * v * c[2]!.x + (1 - u) * v * c[3]!.x;
@@ -151,9 +91,7 @@ function pathPoints(w: ScoredWord | null): Array<{ x: number; y: number }> {
     path.push({ x, y });
   }
   return path;
-}
-
-const bestPath = computed(() => pathPoints(selectedWord.value));
+});
 
 onMounted(async () => {
   await loadWords();
@@ -164,8 +102,6 @@ onMounted(async () => {
 onUnmounted(() => {
   stopScanning();
   stopCamera();
-  if (typeof window !== "undefined" && window.speechSynthesis)
-    window.speechSynthesis.cancel();
 });
 
 function startScanning() {
@@ -196,70 +132,45 @@ async function scanTick() {
     return;
   }
 
-  const committedTiles: (Tile | null)[][] = [];
+  // Vote each cell's fresh read into its consensus state. Committed letters
+  // only change after CONSENSUS_FRAMES consecutive matching reads.
   let readCount = 0;
-
-  // Vote every UNLOCKED cell. Locked cells skip the vote (their letter
-  // survived the last play untouched) and never accumulate misses.
+  let recentlyMissed = 0;
+  const committedTiles: Tile[][] = [];
   for (let r = 0; r < 4; r++) {
+    const rowTiles: Tile[] = [];
     for (let c = 0; c < 4; c++) {
-      const s = cellState[r]![c]!;
-      if (!s.locked) {
-        const read = result.tiles[r]![c]!.letter;
-        if (read)
-          readCount++;
-        voteCell(r, c, read);
-      }
-    }
-  }
-
-  // Promote expected letters and assemble the committed board.
-  for (let r = 0; r < 4; r++) {
-    const rowTiles: (Tile | null)[] = [];
-    for (let c = 0; c < 4; c++) {
-      const s = cellState[r]![c]!;
-      if (!s.locked && s.expected && (!s.committed || s.committed !== s.expected)
-        && (s.candidate === s.expected || s.missCount >= 1)) {
-        s.committed = s.expected;
-        s.expected = "";
-        s.locked = true;
-        s.candidate = "";
-        s.missCount = 0;
-      }
-      rowTiles.push(s.committed ? { letter: s.committed, row: r, col: c } : null);
+      const read = result.tiles[r]![c]!.letter;
+      if (read)
+        readCount++;
+      const committed = voteCell(r, c, read);
+      if (cellState[r]![c]!.missCount >= QUICK_CLEAR_MISSES)
+        recentlyMissed++;
+      rowTiles.push({ letter: committed, row: r, col: c });
     }
     committedTiles.push(rowTiles);
   }
 
-  // Quick-clear bail: a board mid-change has most unlocked cells blank.
-  let unlocked = 0;
-  let unlockedMissing = 0;
-  let recentlyMissed = 0;
-  for (let r = 0; r < 4; r++) {
-    for (let c = 0; c < 4; c++) {
-      const s = cellState[r]![c]!;
-      if (s.locked)
-        continue;
-      unlocked++;
-      if (!s.committed)
-        unlockedMissing++;
-      if (s.missCount >= QUICK_CLEAR_MISSES)
-        recentlyMissed++;
-    }
-  }
+  // Quick-change bail: while the game is between words/boards, most cells
+  // read blank for 2 straight frames. Wipe the old word and drawing now
+  // instead of waiting out the per-cell miss tolerance.
+  //
+  // BUT: a finger on the board during manual word entry occludes cells so
+  // they also read blank. Distinguish by ink coverage: cells under a finger
+  // go mostly dark in the binary image, so an occluded board has high
+  // coverage. Never clear results while the user is actually tracing.
   const occluded = result.inkCoverage >= 0.5;
-  if (unlocked > 0 && !occluded
-    && (unlockedMissing / unlocked >= 0.75 || recentlyMissed >= QUICK_CLEAR_RATIO * unlocked || readCount < 3)) {
+  if (!occluded && (recentlyMissed >= QUICK_CLEAR_RATIO * 16 || readCount < 3)) {
     clearBoardDisplay("Board changing…");
     return;
   }
 
   boardVisible.value = true;
 
-  // Signature over the committed board; stable frames only refresh the
-  // overlay geometry.
-  const sig = committedTiles.flat().map(t => t?.letter || "").join("|");
+  // Compute signature of this committed board to detect changes
+  const sig = committedTiles.flat().map(t => t.letter).join("|");
   if (sig === lastSignature.value) {
+    // Same board, refresh path overlay but don't re-solve
     detection.value = { corners: result.corners };
     statusLine.value = "Board locked";
     return;
@@ -270,62 +181,18 @@ async function scanTick() {
   tiles.value = committedTiles;
   statusLine.value = "Solving…";
   solveCurrent();
-  statusLine.value = "Board locked";
+  statusLine.value = `Board locked — ${committedTiles.flat().map(t => t.letter || "?").join(" ")}`;
 }
 
 /**
  * Hide the stale word + path immediately; per-cell letters stay committed
- * so a settled board re-locks instantly without re-voting every cell.
+ *  so a settled board re-locks instantly without re-voting every cell.
  */
 function clearBoardDisplay(reason: string) {
   detection.value = null;
   boardVisible.value = false;
   lastSignature.value = "";
   statusLine.value = reason;
-}
-
-/**
- * Tap-to-play: mark a word as played on the real board. The solver
- * simulates gravity so the scanner knows which cells to keep (stable ->
- * locked), which to recheck (fallen -> expected letter), and which are
- * brand new (spawned).
- */
-function playWord(w: ScoredWord) {
-  if (!tiles.value)
-    return;
-  speakWord(w.word); // user gesture context: also unlocks TTS reliably
-  const g = applyGravity(tiles.value, w.path);
-  gravity.value = g;
-  for (const p of g.stable) {
-    const s = cellState[p.row]![p.col]!;
-    if (s.committed)
-      s.locked = true;
-  }
-  for (const p of g.fallen) {
-    const s = cellState[p.row]![p.col]!;
-    s.locked = false;
-    s.expected = g.board[p.row]![p.col]!.letter;
-    s.committed = "";
-    s.candidate = "";
-    s.missCount = 0;
-  }
-  for (const p of g.spawned) {
-    const s = cellState[p.row]![p.col]!;
-    s.locked = false;
-    s.expected = "";
-    s.committed = "";
-    s.candidate = "";
-    s.missCount = 0;
-  }
-  // Force the next scan to re-solve against the post-play board instead of
-  // matching the pre-play signature.
-  lastSignature.value = "";
-  // Guaranteed next word: known letters only (stable + fallen).
-  if (trie.value) {
-    const known = solveBoard(g.board, trie.value);
-    guaranteedNext.value = known.slice(0, 3);
-  }
-  statusLine.value = `Played ${w.word.toUpperCase()} — watching for the fall…`;
 }
 
 function solveManual() {
@@ -339,16 +206,7 @@ function solveCurrent() {
   if (!tiles.value || !trie.value)
     return;
   allWords.value = solveBoard(tiles.value, trie.value);
-  const top = allWords.value.length ? allWords.value[0]! : null;
-  // Keep the user's tapped word selected while it is still on the board;
-  // otherwise fall back to the top suggestion.
-  if (selectedWord.value && allWords.value.some(w => w.word === selectedWord.value!.word))
-    selectedWord.value = allWords.value.find(w => w.word === selectedWord.value!.word)!;
-  else
-    selectedWord.value = top;
-  // Speak the word at the top of the list whenever it changes.
-  if (top && top.word !== lastSpoken)
-    speakWord(top.word);
+  bestWord.value = allWords.value.length ? allWords.value[0]! : null;
 }
 
 // Pause scanning when tab hidden to save battery
@@ -370,9 +228,6 @@ if (typeof document !== "undefined") {
       </h1>
       <div class="flex gap-2 items-center">
         <span v-if="scanning" class="loading loading-spinner loading-sm text-primary" />
-        <button class="btn btn-sm btn-ghost" title="Reset board memory" @click="resetCellStates(); lastSignature = ''">
-          <Icon name="tabler:refresh" />
-        </button>
         <button class="btn btn-sm btn-ghost" @click="switchCamera">
           <Icon name="tabler:camera-rotate" />
         </button>
@@ -413,8 +268,8 @@ if (typeof document !== "undefined") {
       />
       <canvas ref="canvasEl" class="hidden" />
 
-      <!-- Overlay: board outline + selected word path. boardVisible gates
-           the drawing so it disappears the moment the board leaves frame. -->
+      <!-- Overlay: board outline + word path. boardVisible gates the whole
+           drawing so it disappears the moment the board leaves the frame. -->
       <svg
         v-if="detection"
         class="absolute inset-0 w-full h-full pointer-events-none"
@@ -461,44 +316,24 @@ if (typeof document !== "undefined") {
       </div>
     </div>
 
-    <!-- Result: selected word large; tap any listed word to mark it played.
-         Hidden entirely while the board is mid-load/mid-solve. -->
-    <div v-if="selectedWord && boardVisible" class="card bg-base-200 border-2 border-base-300 p-4">
-      <div class="flex items-baseline gap-2 flex-wrap">
-        <span class="text-3xl font-bold tracking-widest text-error">{{ selectedWord.word.toUpperCase() }}</span>
-        <span class="text-lg text-base-content/70">{{ selectedWord.score }} pts</span>
-        <button class="btn btn-xs btn-outline btn-error ml-auto" @click="playWord(selectedWord)">
-          Played it
-        </button>
+    <!-- Result: #1 word large, next 2 smaller below it. Hidden entirely
+         while the board is mid-load/mid-solve (boardVisible=false). -->
+    <div v-if="bestWord && boardVisible" class="card bg-base-200 border-2 border-base-300 p-4">
+      <div class="flex items-baseline gap-2">
+        <span class="text-3xl font-bold tracking-widest">{{ bestWord.word.toUpperCase() }}</span>
+        <span class="text-lg text-base-content/70">{{ bestWord.score }} pts</span>
       </div>
       <div
-        v-for="w in allWords.slice(0, 6).filter(x => x.word !== selectedWord?.word)"
+        v-for="w in nextWords"
         :key="w.word"
         class="flex items-baseline gap-2 mt-1 opacity-80"
       >
-        <button class="text-xl font-semibold tracking-wider underline decoration-dotted" @click="selectedWord = w">
-          {{ w.word.toUpperCase() }}
-        </button>
-        <span class="text-sm text-base-content/70">{{ w.score }} pts</span>
-        <button class="btn btn-xs btn-ghost ml-auto" @click="playWord(w)">
-          played
-        </button>
-      </div>
-    </div>
-
-    <!-- Guaranteed next word: solvable from the letters that survive the
-         fall, no dependency on what spawns at the top. -->
-    <div v-if="guaranteedNext.length && boardVisible" class="card bg-base-200 border-2 border-base-300 p-3">
-      <div class="text-sm font-semibold text-base-content/70 mb-1">
-        After the fall (guaranteed)
-      </div>
-      <div v-for="w in guaranteedNext" :key="w.word" class="flex items-baseline gap-2">
-        <span class="text-lg font-semibold tracking-wider">{{ w.word.toUpperCase() }}</span>
+        <span class="text-xl font-semibold tracking-wider">{{ w.word.toUpperCase() }}</span>
         <span class="text-sm text-base-content/70">{{ w.score }} pts</span>
       </div>
     </div>
 
-    <div v-else-if="!manualMode && detection && !selectedWord && boardVisible" class="alert alert-info">
+    <div v-else-if="!manualMode && detection" class="alert alert-info">
       No valid words found on this board.
     </div>
 
@@ -514,17 +349,13 @@ if (typeof document !== "undefined") {
             v-for="w in allWords.slice(0, 50)"
             :key="w.word"
             class="flex justify-between text-sm py-1 border-b border-base-300"
-            :class="{ 'font-bold text-error': w.word === selectedWord?.word }"
+            :class="{ 'font-bold text-primary': w.word === bestWord?.word }"
           >
             <span class="uppercase">{{ w.word }}</span>
             <span>{{ w.score }}</span>
           </div>
         </div>
       </div>
-    </div>
-
-    <div class="text-center text-xs text-base-content/40 mt-4">
-      v{{ appVersion }}
     </div>
   </div>
 </template>

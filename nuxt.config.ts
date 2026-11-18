@@ -1,6 +1,4 @@
 import tailwindcss from "@tailwindcss/vite";
-
-import pkg from "./package.json";
 // https://nuxt.com/docs/api/configuration/nuxt-config
 export default defineNuxtConfig({
   compatibilityDate: "2025-07-15",
@@ -32,8 +30,5 @@ export default defineNuxtConfig({
   },
   runtimeConfig: {
     authPassword: process.env.APP_PASSWORD || process.env.AUTH_PASSWORD || "changeme",
-    public: {
-      appVersion: pkg.version,
-    },
   },
 });
