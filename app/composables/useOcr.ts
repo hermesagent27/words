@@ -121,7 +121,7 @@ export function useOcr() {
    * Detect the board square inside the ROIs, warp it, and OCR the 16 cells.
    * Returns null if no plausible board square is in view.
    */
-  async function detectGrid(source: HTMLCanvasElement): Promise<GridDetectionResult | null> {
+  async function detectGrid(source: HTMLCanvasElement, readCells?: boolean[][]): Promise<GridDetectionResult | null> {
     processing.value = true;
     error.value = null;
     try {
@@ -279,7 +279,7 @@ export function useOcr() {
       for (let r = 0; r < 4; r++) {
         const row: Tile[] = [];
         for (let c = 0; c < 4; c++) {
-          const cell = await extractCellLetter(cv, dst, r, c, cellSize);
+          const cell = await extractCellLetter(cv, dst, r, c, cellSize, readCells?.[r]?.[c] ?? true);
           if (cell.letter)
             lettersRead++;
           if (cell.dark) {
@@ -299,7 +299,7 @@ export function useOcr() {
       // OCR the whole warped board in ONE call. Per-cell crops under a finger
       // see a dark slab instead of a glyph; the whole-board view still has
       // tile edges for segmentation. Expensive, so only run it occluded.
-      if (inkCoverage >= OBSTRUCTION_INK_COVERAGE && lettersRead < 14) {
+      if (!readCells && inkCoverage >= OBSTRUCTION_INK_COVERAGE && lettersRead < 14) {
         const rescued = await ocrWholeBoard(dst); // 16 chars, '_' = unread
         if (rescued) {
           lettersRead = 0;
@@ -359,6 +359,7 @@ export function useOcr() {
     row: number,
     col: number,
     cellSize: number,
+    readLetter: boolean,
   ): Promise<{ letter: string; dark: boolean }> {
     const inset = Math.floor(cellSize * 0.15);
     const inner = cellSize - inset * 2;
@@ -379,6 +380,10 @@ export function useOcr() {
     // binary image mostly-dark, which we surface as `dark`.
     const inkFrac = cv.countNonZero(bin) / (inner * inner);
     const dark = inkFrac > 0.5;
+    if (!readLetter) {
+      bin.delete();
+      return { letter: "", dark };
+    }
 
     const openKernel = cv.getStructuringElement(cv.MORPH_ELLIPSE, new cv.Size(2, 2));
     const opened = new cv.Mat();
