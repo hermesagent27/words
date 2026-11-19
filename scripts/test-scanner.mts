@@ -4,6 +4,7 @@ import { test } from "node:test";
 import { projectBoardPoint } from "../app/utils/boardGeometry.ts";
 import { createBoardConsensus, createWordChangeMonitor } from "../app/utils/consensus.ts";
 import { selectWordSet, solveBoard, Trie } from "../app/utils/solver.ts";
+import { createWordSpeech } from "../app/utils/wordSpeech.ts";
 
 function board(rows: string[]) {
   return rows.map((letters, row) =>
@@ -81,4 +82,36 @@ test("overlay projection follows perspective rather than bilinear interpolation"
   const center = projectBoardPoint(corners, 0.5, 0.5);
   assert.ok(Math.abs(center.x - 50) < 1e-8);
   assert.ok(Math.abs(center.y - 62.5) < 1e-8);
+});
+
+test("speech reads the supplied order and cancels before replacing or stopping it", () => {
+  type Request = { text: string; onerror: SpeechSynthesisUtterance["onerror"] };
+  const actions: string[] = [];
+  const speech = createWordSpeech(
+    {
+      cancel: () => { actions.push("cancel"); },
+      speak: (request: Request) => { actions.push(request.text); },
+    },
+    (text: string): Request => ({ text, onerror: null }),
+    message => assert.fail(message),
+  );
+  speech.speak(["now", "rut", "our"]);
+  speech.speak(["new", "words"]);
+  speech.stop();
+  assert.deepEqual(actions, ["cancel", "now. rut. our", "cancel", "new. words", "cancel"]);
+});
+
+test("speech reports failures instead of silently appearing to work", () => {
+  type Request = { text: string; onerror: SpeechSynthesisUtterance["onerror"] };
+  const errors: string[] = [];
+  const speech = createWordSpeech(
+    {
+      cancel: () => {},
+      speak: (_request: Request) => { throw new Error("blocked"); },
+    },
+    (text: string): Request => ({ text, onerror: null }),
+    message => errors.push(message),
+  );
+  speech.speak(["cat"]);
+  assert.deepEqual(errors, ["Unable to start speech: blocked"]);
 });

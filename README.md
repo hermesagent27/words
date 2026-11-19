@@ -29,8 +29,14 @@ orange, yellow to lime, green to teal, and light blue to purple; later paths
 are black. Words are listed roughly top to bottom. Gravity may still move
 remaining paths, so the frozen paths are only a guide. The full word list
 remains available separately; the best individual word need not be part of
-the best combined set. A Q tile spells QU and scores 10 points; enter Q in
-manual mode.
+the best combined set. A Q tile spells QU and scores 10 points.
+
+Use the speaker button to enable or mute speech. When enabled, the app reads
+each locked board's suggested words once in their displayed order; enabling it
+on an already locked board reads that board immediately. Resetting, muting, or
+refreshing a locked board stops the previous speech. Speech is off initially
+because browsers may require a user gesture, and availability depends on the
+browser and installed voices.
 
 Run scanner and gravity checks with:
 

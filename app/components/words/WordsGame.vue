@@ -5,17 +5,18 @@ import type { ScoredWord, Tile } from "~/utils/solver";
 import { projectBoardPoint } from "~/utils/boardGeometry";
 import { createBoardConsensus, createWordChangeMonitor } from "~/utils/consensus";
 import { selectWordSet, solveBoard } from "~/utils/solver";
+import { createWordSpeech } from "~/utils/wordSpeech";
 
 const { trie, error: dictionaryError, load: loadWords } = useWordList();
-const { videoEl, canvasEl, ready: cameraReady, error: cameraError, start: startCamera, stop: stopCamera, switchCamera, captureFrame } = useCamera();
+const { videoEl, canvasEl, ready: cameraReady, error: cameraError, start: startCamera, stop: stopCamera, captureFrame } = useCamera();
 const { error: ocrError, detectGrid } = useOcr();
 const consensus = createBoardConsensus();
 const snapshotEl = ref<HTMLCanvasElement | null>(null);
 const frozen = ref<{ width: number; height: number } | null>(null);
 
-const manualMode = ref(false);
-const manualTiles = ref<Tile[][]>(Array.from({ length: 4 }, (_, row) =>
-  Array.from({ length: 4 }, (_, col) => ({ letter: "", row, col }))));
+const speechEnabled = ref(false);
+const speechSupported = ref(false);
+const speechError = ref<string | null>(null);
 const scanning = ref(false);
 const detection = ref<Point[] | null>(null);
 const tiles = ref<Tile[][] | null>(null);
@@ -35,8 +36,10 @@ let revision = 0;
 let working = false;
 let pending: { frame: HTMLCanvasElement; revision: number } | null = null;
 let monitor: ReturnType<typeof createWordChangeMonitor> | null = null;
+let speech: ReturnType<typeof createWordSpeech<SpeechSynthesisUtterance>> | null = null;
 
 function resetBoard() {
+  speech?.stop();
   revision++;
   pending = null;
   consensus.reset();
@@ -50,14 +53,17 @@ function resetBoard() {
   statusLine.value = "Looking for board…";
 }
 
-function toggleManualMode() {
-  resetBoard();
-  manualMode.value = !manualMode.value;
-}
-
-async function changeCamera() {
-  resetBoard();
-  await switchCamera();
+function toggleSpeech() {
+  if (!speech)
+    return;
+  speechEnabled.value = !speechEnabled.value;
+  speechError.value = null;
+  if (!speechEnabled.value) {
+    speech.stop();
+    return;
+  }
+  if (frozen.value)
+    speech.speak(selectedWords.value.map(word => word.word));
 }
 
 function solveCurrent(board: Tile[][]) {
@@ -70,14 +76,6 @@ function solveCurrent(board: Tile[][]) {
   lastSignature.value = signature;
   allWords.value = solveBoard(board, trie.value);
   selectedWords.value = selectWordSet(board, trie.value);
-}
-
-function solveManual() {
-  solveCurrent(manualTiles.value.map(row => row.map(tile => ({ ...tile }))));
-}
-
-function manualTileAt(i: number): Tile {
-  return manualTiles.value[Math.floor(i / 4)]![i % 4]!;
 }
 
 const paths = computed(() => {
@@ -117,6 +115,10 @@ function lockSnapshot(frame: HTMLCanvasElement, board: Tile[][]) {
   frozen.value = { width: frame.width, height: frame.height };
   monitor = createWordChangeMonitor(board, selectedWords.value);
   statusLine.value = `Board locked — 0/${selectedWords.value.length} suggested words changed`;
+  if (speechEnabled.value && speech) {
+    speechError.value = null;
+    speech.speak(selectedWords.value.map(word => word.word));
+  }
 }
 
 function startScanning() {
@@ -136,7 +138,7 @@ function stopScanning() {
 }
 
 function captureSnapshot() {
-  if (manualMode.value || !cameraReady.value)
+  if (!cameraReady.value)
     return;
   const source = captureFrame();
   if (!source)
@@ -163,7 +165,7 @@ async function processSnapshots() {
       const snapshot: { frame: HTMLCanvasElement; revision: number } = pending;
       pending = null;
       const result = await detectGrid(snapshot.frame);
-      if (snapshot.revision !== revision || manualMode.value)
+      if (snapshot.revision !== revision)
         continue;
       if (!result) {
         consensus.reset();
@@ -186,6 +188,7 @@ async function processSnapshots() {
           statusLine.value = `Board locked — ${progress.count}/${progress.total} suggested words changed`;
           continue;
         }
+        speech?.stop();
         monitor = null;
         frozen.value = null;
       }
@@ -210,6 +213,20 @@ function visibilityChanged() {
 }
 
 onMounted(async () => {
+  if ("speechSynthesis" in window && window.speechSynthesis
+    && typeof window.speechSynthesis.speak === "function"
+    && typeof window.speechSynthesis.cancel === "function"
+    && typeof window.SpeechSynthesisUtterance === "function") {
+    speech = createWordSpeech(
+      window.speechSynthesis,
+      text => new SpeechSynthesisUtterance(text),
+      message => speechError.value = message,
+    );
+    speechSupported.value = true;
+  }
+  else {
+    speechError.value = "Text-to-speech is not supported in this browser.";
+  }
   document.addEventListener("visibilitychange", visibilityChanged);
   await loadWords();
   await startCamera();
@@ -217,6 +234,7 @@ onMounted(async () => {
 });
 
 onUnmounted(() => {
+  speech?.stop();
   document.removeEventListener("visibilitychange", visibilityChanged);
   stopScanning();
   stopCamera();
@@ -239,38 +257,20 @@ onUnmounted(() => {
         >
           <Icon name="tabler:refresh" />
         </button>
-        <button class="btn btn-sm btn-ghost" aria-label="Switch camera" @click="changeCamera">
-          <Icon name="tabler:camera-rotate" />
-        </button>
-        <button class="btn btn-sm btn-ghost" aria-label="Toggle manual entry" @click="toggleManualMode">
-          <Icon name="tabler:keyboard" />
-        </button>
-      </div>
-    </div>
-
-    <div v-if="manualMode" class="card bg-base-200 border-2 border-base-300 p-4">
-      <h2 class="font-semibold mb-2">
-        Manual Test Grid
-      </h2>
-      <div class="grid grid-cols-4 gap-2 mb-2">
-        <input
-          v-for="(_, i) in manualTiles.flat()"
-          :key="i"
-          :model-value="manualTileAt(i).letter"
-          maxlength="1"
-          class="input input-bordered text-center uppercase font-mono"
-          @input="manualTileAt(i).letter = ($event.target as HTMLInputElement).value.toUpperCase().replace(/[^A-Z]/g, '')"
+        <button
+          class="btn btn-sm btn-ghost"
+          :title="speechEnabled ? 'Mute spoken words' : 'Enable spoken words'"
+          aria-label="Read words aloud"
+          :aria-pressed="speechEnabled"
+          :disabled="!speechSupported"
+          @click="toggleSpeech"
         >
+          <Icon :name="speechEnabled ? 'tabler:volume' : 'tabler:volume-off'" />
+        </button>
       </div>
-      <p class="text-sm mb-2">
-        Enter Q for a QU tile.
-      </p>
-      <button class="btn btn-primary btn-sm" @click="solveManual">
-        Solve
-      </button>
     </div>
 
-    <div v-else>
+    <div>
       <div class="relative">
         <video
           ref="videoEl"
@@ -345,14 +345,17 @@ onUnmounted(() => {
       </div>
     </div>
 
-    <div v-if="cameraError && !manualMode" class="alert alert-error">
+    <div v-if="cameraError" class="alert alert-error">
       {{ cameraError }}
     </div>
-    <div v-if="ocrError && !manualMode" class="alert alert-error">
+    <div v-if="ocrError" class="alert alert-error">
       {{ ocrError }}
     </div>
     <div v-if="dictionaryError" class="alert alert-error">
       Dictionary: {{ dictionaryError }}
+    </div>
+    <div v-if="speechError" class="alert alert-error" role="status">
+      {{ speechError }}
     </div>
 
     <div v-if="selectedWords.length" class="card bg-base-200 border-2 border-base-300 p-4">
