@@ -4,7 +4,7 @@ import type { ScoredWord, Tile } from "~/utils/solver";
 
 import { projectBoardPoint } from "~/utils/boardGeometry";
 import { createBoardConsensus, createWordChangeMonitor } from "~/utils/consensus";
-import { selectWordSet, solveBoard } from "~/utils/solver";
+import { selectWordSet } from "~/utils/solver";
 import { createWordSpeech } from "~/utils/wordSpeech";
 
 const { trie, error: dictionaryError, load: loadWords } = useWordList();
@@ -21,7 +21,6 @@ const scanning = ref(false);
 const processedSnapshots = ref(0);
 const detection = ref<Point[] | null>(null);
 const tiles = ref<Tile[][] | null>(null);
-const allWords = ref<ScoredWord[]>([]);
 const selectedWords = ref<ScoredWord[]>([]);
 const statusLine = ref("Starting…");
 const lastSignature = ref("");
@@ -49,7 +48,6 @@ function resetBoard() {
   monitor = null;
   detection.value = null;
   tiles.value = null;
-  allWords.value = [];
   selectedWords.value = [];
   lastSignature.value = "";
   statusLine.value = "Looking for board…";
@@ -76,7 +74,6 @@ function solveCurrent(board: Tile[][]) {
   if (signature === lastSignature.value)
     return;
   lastSignature.value = signature;
-  allWords.value = solveBoard(board, trie.value);
   selectedWords.value = selectWordSet(board, trie.value);
 }
 
@@ -177,7 +174,6 @@ async function processSnapshots() {
           continue;
         }
         tiles.value = null;
-        allWords.value = [];
         selectedWords.value = [];
         lastSignature.value = "";
         detection.value = null;
@@ -255,9 +251,9 @@ onUnmounted(() => {
 </script>
 
 <template>
-  <div class="flex flex-col gap-4 p-4 max-w-2xl mx-auto">
-    <div class="flex items-center justify-between">
-      <h1 class="text-2xl font-bold">
+  <div class="flex h-full w-full min-h-0 flex-col gap-1 p-2">
+    <div class="flex shrink-0 items-center justify-between">
+      <h1 class="text-xl font-bold">
         Words
       </h1>
       <div class="flex gap-2 items-center">
@@ -283,125 +279,112 @@ onUnmounted(() => {
       </div>
     </div>
 
-    <div>
-      <div class="relative">
-        <video
-          ref="videoEl"
-          autoplay
-          playsinline
-          muted
-          class="rounded-lg bg-black"
-          :class="frozen ? 'absolute inset-0 w-full h-full pointer-events-none' : 'w-full'"
-        />
-        <canvas
-          v-show="frozen"
-          ref="snapshotEl"
-          class="relative w-full rounded-lg bg-black"
-          aria-label="Locked board snapshot"
-        />
-        <canvas ref="canvasEl" class="hidden" />
-        <svg
-          v-if="detection"
-          class="absolute inset-0 w-full h-full pointer-events-none"
-          :viewBox="`0 0 ${frozen?.width || canvasEl?.width || 1} ${frozen?.height || canvasEl?.height || 1}`"
-          preserveAspectRatio="none"
-        >
-          <polygon
-            :points="detection.map(p => `${p.x},${p.y}`).join(' ')"
-            fill="none"
-            stroke="lime"
-            stroke-width="3"
-            opacity="0.7"
+    <div class="flex flex-1 min-h-0 flex-col gap-1 landscape:flex-row">
+      <div class="flex flex-1 min-h-0 min-w-0 flex-col gap-1">
+        <div class="relative flex-1 min-h-0 overflow-hidden rounded-lg bg-black">
+          <video
+            ref="videoEl"
+            autoplay
+            playsinline
+            muted
+            class="absolute inset-0 h-full w-full object-contain"
+            :class="{ 'pointer-events-none': frozen }"
           />
-          <template v-for="(path, index) in paths" :key="index">
-            <template v-for="(point, i) in path.slice(1)" :key="i">
-              <defs>
-                <linearGradient
-                  :id="`word-${index}-${i}`"
-                  gradientUnits="userSpaceOnUse"
+          <canvas
+            v-show="frozen"
+            ref="snapshotEl"
+            class="absolute inset-0 h-full w-full bg-black object-contain"
+            aria-label="Locked board snapshot"
+          />
+          <canvas ref="canvasEl" class="hidden" />
+          <svg
+            v-if="detection"
+            class="absolute inset-0 w-full h-full pointer-events-none"
+            :viewBox="`0 0 ${frozen?.width || canvasEl?.width || 1} ${frozen?.height || canvasEl?.height || 1}`"
+            preserveAspectRatio="xMidYMid meet"
+          >
+            <polygon
+              :points="detection.map(p => `${p.x},${p.y}`).join(' ')"
+              fill="none"
+              stroke="lime"
+              stroke-width="3"
+              opacity="0.7"
+            />
+            <template v-for="(path, index) in paths" :key="index">
+              <template v-for="(point, i) in path.slice(1)" :key="i">
+                <defs>
+                  <linearGradient
+                    :id="`word-${index}-${i}`"
+                    gradientUnits="userSpaceOnUse"
+                    :x1="path[i]!.x"
+                    :y1="path[i]!.y"
+                    :x2="point.x"
+                    :y2="point.y"
+                  >
+                    <stop offset="0%" :stop-color="colorAt(index, i / (path.length - 1))" />
+                    <stop offset="100%" :stop-color="colorAt(index, (i + 1) / (path.length - 1))" />
+                  </linearGradient>
+                </defs>
+                <line
                   :x1="path[i]!.x"
                   :y1="path[i]!.y"
                   :x2="point.x"
                   :y2="point.y"
-                >
-                  <stop offset="0%" :stop-color="colorAt(index, i / (path.length - 1))" />
-                  <stop offset="100%" :stop-color="colorAt(index, (i + 1) / (path.length - 1))" />
-                </linearGradient>
-              </defs>
-              <line
-                :x1="path[i]!.x"
-                :y1="path[i]!.y"
-                :x2="point.x"
-                :y2="point.y"
-                :stroke="`url(#word-${index}-${i})`"
-                stroke-width="12"
-                stroke-linecap="round"
+                  :stroke="`url(#word-${index}-${i})`"
+                  stroke-width="12"
+                  stroke-linecap="round"
+                />
+              </template>
+              <circle
+                v-if="path[0]"
+                :cx="path[0].x"
+                :cy="path[0].y"
+                r="24"
+                :fill="colorAt(index, 0)"
+                stroke="white"
+                stroke-width="3"
               />
             </template>
-            <circle
-              v-if="path[0]"
-              :cx="path[0].x"
-              :cy="path[0].y"
-              r="24"
-              :fill="colorAt(index, 0)"
-              stroke="white"
-              stroke-width="3"
-            />
-          </template>
-        </svg>
-      </div>
-      <div class="text-sm text-base-content/70 mt-2 text-center">
-        {{ statusLine }}
-      </div>
-      <div class="text-xs text-base-content/60 text-center">
-        Processed snapshots: {{ processedSnapshots }}
-      </div>
-      <div v-if="tiles" class="text-sm text-center font-mono" aria-label="Confirmed board">
-        {{ tiles.map(row => row.map(tile => tile.letter === "Q" ? "QU" : tile.letter || "?").join(" ")).join(" / ") }}
-      </div>
-    </div>
-
-    <div v-if="cameraError" class="alert alert-error">
-      {{ cameraError }}
-    </div>
-    <div v-if="ocrError" class="alert alert-error">
-      {{ ocrError }}
-    </div>
-    <div v-if="dictionaryError" class="alert alert-error">
-      Dictionary: {{ dictionaryError }}
-    </div>
-    <div v-if="speechError" class="alert alert-error" role="status">
-      {{ speechError }}
-    </div>
-
-    <div v-if="selectedWords.length" class="card bg-base-200 border-2 border-base-300 p-4">
-      <h2 class="font-semibold">
-        Suggested words (top to bottom)
-      </h2>
-      <p class="text-sm">
-        The snapshot stays until each suggested word changes. Falling tiles can change remaining paths.
-      </p>
-      <div v-for="(word, i) in selectedWords" :key="`${word.word}-${i}`" class="flex items-baseline gap-2 mt-1">
-        <span :style="{ color: colorAt(i, 0) }" aria-hidden="true">●</span>
-        <span class="text-xl font-semibold tracking-wider">{{ word.word.toUpperCase() }}</span>
-        <span class="text-sm text-base-content/70">{{ word.score }} pts</span>
-      </div>
-    </div>
-    <div v-else-if="tiles" class="alert alert-info">
-      No valid words found on confirmed tiles.
-    </div>
-
-    <div v-if="allWords.length" class="collapse collapse-arrow bg-base-200 border-2 border-base-300">
-      <input type="checkbox">
-      <div class="collapse-title font-medium">
-        All words ({{ allWords.length }})
-      </div>
-      <div class="collapse-content">
-        <div class="max-h-48 overflow-y-auto">
-          <div v-for="word in allWords.slice(0, 50)" :key="word.word" class="flex justify-between text-sm py-1 border-b border-base-300">
-            <span class="uppercase">{{ word.word }}</span>
-            <span>{{ word.score }}</span>
+          </svg>
+        </div>
+        <div class="flex shrink-0 flex-wrap justify-center gap-x-2 text-center text-xs text-base-content/70">
+          <span>{{ statusLine }}</span>
+          <span>Processed snapshots: {{ processedSnapshots }}</span>
+          <span v-if="tiles" class="font-mono" aria-label="Confirmed board">
+            {{ tiles.map(row => row.map(tile => tile.letter === "Q" ? "QU" : tile.letter || "?").join(" ")).join(" / ") }}
+          </span>
+        </div>
+        <div v-if="cameraError || ocrError || dictionaryError || speechError" class="shrink-0 max-h-[20dvh] overflow-y-auto text-sm">
+          <div v-if="cameraError" class="alert alert-error py-1">
+            {{ cameraError }}
           </div>
+          <div v-if="ocrError" class="alert alert-error py-1">
+            {{ ocrError }}
+          </div>
+          <div v-if="dictionaryError" class="alert alert-error py-1">
+            Dictionary: {{ dictionaryError }}
+          </div>
+          <div v-if="speechError" class="alert alert-error py-1" role="status">
+            {{ speechError }}
+          </div>
+        </div>
+      </div>
+
+      <div v-if="selectedWords.length || tiles" class="flex shrink-0 flex-col gap-1 landscape:w-[min(36%,18rem)]">
+        <div v-if="selectedWords.length" class="rounded-lg border border-base-300 bg-base-200 px-2 py-1">
+          <h2 class="text-sm font-semibold">
+            Suggested words (top to bottom)
+          </h2>
+          <div class="flex flex-wrap gap-x-3 gap-y-1">
+            <div v-for="(word, i) in selectedWords" :key="`${word.word}-${i}`" class="flex items-baseline gap-1">
+              <span :style="{ color: colorAt(i, 0) }" aria-hidden="true">●</span>
+              <span class="text-base font-semibold tracking-wide">{{ word.word.toUpperCase() }}</span>
+              <span class="text-xs text-base-content/70">{{ word.score }} pts</span>
+            </div>
+          </div>
+        </div>
+        <div v-else-if="tiles" class="rounded-lg bg-base-200 px-2 py-1 text-sm">
+          No valid words found on confirmed tiles.
         </div>
       </div>
     </div>

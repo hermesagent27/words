@@ -32,9 +32,10 @@ The suggested set maximizes the combined score of non-overlapping words. Each
 path has a larger solid-color start marker: the first four fade from red to
 orange, yellow to lime, green to teal, and light blue to purple; later paths
 are black. Words are listed roughly top to bottom. Gravity may still move
-remaining paths, so the frozen paths are only a guide. The full word list
-remains available separately; the best individual word need not be part of
-the best combined set. A Q tile spells QU and scores 10 points.
+remaining paths, so the frozen paths are only a guide. The best individual word
+need not be part of the best combined set. A Q tile spells QU and scores 10 points.
+The camera or locked snapshot and suggested words fit within the available
+screen.
 
 Use the speaker button to enable or mute speech. When enabled, the app reads
 each locked board's suggested words once in their displayed order; enabling it
