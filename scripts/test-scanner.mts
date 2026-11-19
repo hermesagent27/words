@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 
 import { projectBoardPoint } from "../app/utils/boardGeometry.ts";
+import { isBoardObstructed } from "../app/utils/boardObstruction.ts";
 import { createBoardConsensus, createWordChangeMonitor } from "../app/utils/consensus.ts";
 import { selectWordSet, solveBoard, Trie } from "../app/utils/solver.ts";
 import { createWordSpeech } from "../app/utils/wordSpeech.ts";
@@ -52,6 +53,39 @@ test("consensus requires consecutive matching reads and retains transient misses
   assert.equal(consensus.update(blank)[0]![0]!.letter, "B");
   assert.equal(consensus.update(blank)[0]![0]!.letter, "B");
   assert.equal(consensus.update(blank)[0]![0]!.letter, "");
+});
+
+test("an interrupted scan preserves confirmed letters but breaks consecutive votes", () => {
+  const consensus = createBoardConsensus();
+  const a = board(["A...", "....", "....", "...."]);
+  const b = board(["B...", "....", "....", "...."]);
+  consensus.update(a);
+  consensus.update(a);
+  assert.equal(consensus.update(b)[0]![0]!.letter, "A");
+  consensus.interrupt();
+  assert.equal(consensus.update(b)[0]![0]!.letter, "A");
+  assert.equal(consensus.update(b)[0]![0]!.letter, "B");
+});
+
+test("large skin-colored or dark patches block a board, but small glyphs do not", () => {
+  const size = 400;
+  const pixels = new Uint8Array(size * size * 4).fill(240);
+  function patch(width: number, height: number, color: number[]) {
+    for (let y = 20; y < 20 + height; y++) {
+      for (let x = 20; x < 20 + width; x++) {
+        const index = (y * size + x) * 4;
+        pixels[index] = color[0]!;
+        pixels[index + 1] = color[1]!;
+        pixels[index + 2] = color[2]!;
+      }
+    }
+  }
+  patch(15, 30, [25, 25, 25]);
+  assert.equal(isBoardObstructed(pixels, size), false);
+  patch(45, 50, [198, 130, 94]);
+  assert.equal(isBoardObstructed(pixels, size), true);
+  patch(60, 60, [28, 28, 28]);
+  assert.equal(isBoardObstructed(pixels, size), true);
 });
 
 test("locked words refresh only after every path has a confirmed changed tile", () => {

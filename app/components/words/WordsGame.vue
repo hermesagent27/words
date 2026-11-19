@@ -18,6 +18,7 @@ const speechEnabled = ref(false);
 const speechSupported = ref(false);
 const speechError = ref<string | null>(null);
 const scanning = ref(false);
+const processedSnapshots = ref(0);
 const detection = ref<Point[] | null>(null);
 const tiles = ref<Tile[][] | null>(null);
 const allWords = ref<ScoredWord[]>([]);
@@ -43,6 +44,7 @@ function resetBoard() {
   revision++;
   pending = null;
   consensus.reset();
+  processedSnapshots.value = 0;
   frozen.value = null;
   monitor = null;
   detection.value = null;
@@ -167,6 +169,7 @@ async function processSnapshots() {
       const result = await detectGrid(snapshot.frame);
       if (snapshot.revision !== revision)
         continue;
+      processedSnapshots.value++;
       if (!result) {
         consensus.reset();
         if (frozen.value) {
@@ -179,6 +182,16 @@ async function processSnapshots() {
         lastSignature.value = "";
         detection.value = null;
         statusLine.value = ocrError.value ? "Scan failed" : "Board not visible";
+        continue;
+      }
+      if (result.obstructed) {
+        consensus.interrupt();
+        statusLine.value = frozen.value ? "Board obstructed — keeping snapshot" : "Board obstructed — waiting for a clear view";
+        continue;
+      }
+      if (frozen.value && result.tiles.some(row => row.some(tile => !tile.letter))) {
+        consensus.interrupt();
+        statusLine.value = "Waiting for a clear, readable board — keeping snapshot";
         continue;
       }
       const board = consensus.update(result.tiles);
@@ -278,12 +291,12 @@ onUnmounted(() => {
           playsinline
           muted
           class="rounded-lg bg-black"
-          :class="frozen ? 'absolute w-px h-px opacity-0 pointer-events-none' : 'w-full'"
+          :class="frozen ? 'absolute inset-0 w-full h-full pointer-events-none' : 'w-full'"
         />
         <canvas
           v-show="frozen"
           ref="snapshotEl"
-          class="w-full rounded-lg bg-black"
+          class="relative w-full rounded-lg bg-black"
           aria-label="Locked board snapshot"
         />
         <canvas ref="canvasEl" class="hidden" />
@@ -339,6 +352,9 @@ onUnmounted(() => {
       </div>
       <div class="text-sm text-base-content/70 mt-2 text-center">
         {{ statusLine }}
+      </div>
+      <div class="text-xs text-base-content/60 text-center">
+        Processed snapshots: {{ processedSnapshots }}
       </div>
       <div v-if="tiles" class="text-sm text-center font-mono" aria-label="Confirmed board">
         {{ tiles.map(row => row.map(tile => tile.letter === "Q" ? "QU" : tile.letter || "?").join(" ")).join(" / ") }}

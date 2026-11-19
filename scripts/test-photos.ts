@@ -44,6 +44,8 @@ export async function testPhotos() {
       const result = await ocr.detectGrid(canvas);
       if (!result)
         throw new Error(`${photo}: ${ocr.error.value ?? "board not detected"}`);
+      if (result.obstructed)
+        throw new Error(`${photo}: unobstructed board was marked obstructed`);
       board = consensus.update(result.tiles);
     }
     if (!board)
@@ -91,7 +93,18 @@ export async function testPhotos() {
     }
   }
   const syntheticResult = await ocr.detectGrid(synthetic);
-  if (syntheticResult?.tiles[0]?.[0]?.letter !== "Q")
-    throw new Error(`Synthetic QU tile was not read as Q: ${ocr.error.value ?? syntheticResult?.tiles[0]?.[0]?.letter ?? "not detected"}`);
+  if (!syntheticResult || syntheticResult.obstructed || syntheticResult.tiles[0]?.[0]?.letter !== "Q")
+    throw new Error(`Synthetic QU tile was not read as Q: ${ocr.error.value ?? "not detected"}`);
+  const clearBoard = context.getImageData(0, 0, synthetic.width, synthetic.height);
+  for (const color of ["#c68861", "#784b34", "#1f1f1f"]) {
+    context.putImageData(clearBoard, 0, 0);
+    context.fillStyle = color;
+    context.beginPath();
+    context.ellipse(170, 310, 35, 45, 0, 0, Math.PI * 2);
+    context.fill();
+    const result = await ocr.detectGrid(synthetic);
+    if (!result?.obstructed)
+      throw new Error(`Synthetic obstruction ${color} was not detected`);
+  }
   return results;
 }

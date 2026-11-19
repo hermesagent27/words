@@ -3,6 +3,7 @@ import type { Worker } from "tesseract.js";
 import type { Point } from "~/utils/boardGeometry";
 import type { Tile } from "~/utils/solver";
 
+import { isBoardObstructed } from "~/utils/boardObstruction";
 import { detectBoardCorners } from "~/utils/detectBoard";
 
 let cvLoading: Promise<unknown> | null = null;
@@ -38,10 +39,9 @@ async function getWorker(): Promise<Worker> {
 const MIN_CONFIDENCE = 55;
 const WARP_SIZE = 400;
 
-export type GridDetectionResult = {
-  tiles: Tile[][];
-  corners: Point[];
-};
+export type GridDetectionResult
+  = | { corners: Point[]; obstructed: true }
+    | { corners: Point[]; obstructed: false; tiles: Tile[][] };
 
 export function useOcr() {
   const processing = ref(false);
@@ -65,14 +65,17 @@ export function useOcr() {
         return null;
 
       const src = cv.imread(canvas);
-      const gray = new cv.Mat();
+      const color = new cv.Mat();
       const warped = new cv.Mat();
       const from = cv.matFromArray(4, 1, cv.CV_32FC2, corners.flatMap(p => [p.x, p.y]));
       const to = cv.matFromArray(4, 1, cv.CV_32FC2, [0, 0, WARP_SIZE, 0, WARP_SIZE, WARP_SIZE, 0, WARP_SIZE]);
       const transform = cv.getPerspectiveTransform(from, to);
       try {
-        cv.cvtColor(src, gray, cv.COLOR_RGBA2GRAY);
-        cv.warpPerspective(gray, warped, transform, new cv.Size(WARP_SIZE, WARP_SIZE), cv.INTER_LINEAR);
+        cv.warpPerspective(src, color, transform, new cv.Size(WARP_SIZE, WARP_SIZE), cv.INTER_LINEAR);
+        const fullCorners = corners.map(p => ({ x: p.x / scale, y: p.y / scale }));
+        if (isBoardObstructed(color.data, WARP_SIZE))
+          return { corners: fullCorners, obstructed: true };
+        cv.cvtColor(color, warped, cv.COLOR_RGBA2GRAY);
         const tiles: Tile[][] = [];
         for (let row = 0; row < 4; row++) {
           const cells: Tile[] = [];
@@ -82,12 +85,13 @@ export function useOcr() {
         }
         return {
           tiles,
-          corners: corners.map(p => ({ x: p.x / scale, y: p.y / scale })),
+          corners: fullCorners,
+          obstructed: false,
         };
       }
       finally {
         src.delete();
-        gray.delete();
+        color.delete();
         warped.delete();
         from.delete();
         to.delete();

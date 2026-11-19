@@ -38,7 +38,14 @@ export function createBoardConsensus() {
     }
   }
 
-  return { update, reset };
+  function interrupt() {
+    for (const row of cells) {
+      for (const cell of row)
+        Object.assign(cell, { candidate: "", count: 0, misses: 0 });
+    }
+  }
+
+  return { update, reset, interrupt };
 }
 
 export function createWordChangeMonitor(board: Tile[][], words: ScoredWord[]) {

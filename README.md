@@ -18,6 +18,11 @@ to monitor the camera. It refreshes after at least one confirmed tile changes
 on each suggested path, even if a previously suggested word can be made again.
 If the board is temporarily hidden, the frozen snapshot stays visible. Use
 **Reset board memory** to release it or clear a persistent wrong read.
+The processed-snapshot counter shows that monitoring is continuing. The app
+pauses change tracking when a board appears obstructed or any tile is
+unreadable, and waits for clear, consecutive reads before updating again.
+Obstruction detection is heuristic and may not recognize every hand or
+lighting condition.
 
 The scanner cannot tell that a replacement tile has the same letter as the
 previous tile. If that prevents a suggested path from registering a change,
@@ -53,9 +58,10 @@ await (await import("/_nuxt/@fs/C:/absolute/path/to/words/scripts/test-photos.ts
 ```
 
 The photo test checks two repeated still-image reads, the expected 16 letters,
-and TORPOR as the best individual word. It also checks a blank image and a
-synthetic QU tile, and reports processing time. It does not replace testing
-with a moving camera or real falling tiles.
+and TORPOR as the best individual word. It also checks a blank image, a
+synthetic QU tile and simulated obstructions, and reports processing time.
+It does not replace testing with a moving camera, a real finger or real
+falling tiles.
 
 ## Repository Structure
 
