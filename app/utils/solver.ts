@@ -159,3 +159,28 @@ export function bestWord(tiles: Tile[][], trie: Trie): ScoredWord | null {
   const all = solveBoard(tiles, trie);
   return all.length ? all[0]! : null;
 }
+
+/** Remove the played cells, drop survivors, and leave new top cells blank. */
+export function applyGravity(tiles: Tile[][], path: PathStep[]): Tile[][] {
+  const used = new Set(path.map(step => `${step.row},${step.col}`));
+  const result: Tile[][] = Array.from({ length: 4 }, (_, row) =>
+    Array.from({ length: 4 }, (_, col) => ({ row, col, letter: "" })));
+
+  for (let col = 0; col < 4; col++) {
+    let dest = 3;
+    for (let row = 3; row >= 0; row--) {
+      if (!used.has(`${row},${col}`)) {
+        result[dest]![col]!.letter = tiles[row]![col]!.letter;
+        dest--;
+      }
+    }
+  }
+  return result;
+}
+
+export function wordPathChanged(board: Tile[][], observed: Tile[][], path: PathStep[]): boolean {
+  return path.length > 0 && path.every(({ row, col }) => {
+    const read = observed[row]![col]!.letter;
+    return read !== "" && read !== board[row]![col]!.letter;
+  });
+}

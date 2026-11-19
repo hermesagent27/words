@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import type { ScoredWord, Tile } from "~/utils/solver";
 
-import { solveBoard } from "~/utils/solver";
+import { applyGravity, solveBoard, wordPathChanged } from "~/utils/solver";
 
 const { trie, load: loadWords } = useWordList();
 const { videoEl, canvasEl, ready: cameraReady, error: cameraError, start: startCamera, stop: stopCamera, switchCamera, captureFrame } = useCamera();
@@ -24,6 +24,7 @@ const allWords = ref<ScoredWord[]>([]);
 const bestWord = ref<ScoredWord | null>(null);
 const lastSignature = ref<string>("");
 const statusLine = ref("Starting…");
+const canConfirmPlay = ref(false);
 
 // Per-cell consensus voting. Each cell has a candidate letter (latest read)
 // and a stable letter (committed). A letter is only committed after
@@ -38,9 +39,87 @@ const MISS_TOLERANCE = 3;
 // is the signal to wipe the old word + drawing immediately.
 const QUICK_CLEAR_MISSES = 2;
 const QUICK_CLEAR_RATIO = 0.5;
-type CellState = { candidate: string; candidateCount: number; committed: string; missCount: number };
+type CellState = { candidate: string; candidateCount: number; committed: string; missCount: number; locked: boolean };
+function freshCell(): CellState {
+  return { candidate: "", candidateCount: 0, committed: "", missCount: 0, locked: false };
+}
 const cellState: CellState[][] = Array.from({ length: 4 }, () =>
-  Array.from({ length: 4 }, () => ({ candidate: "", candidateCount: 0, committed: "", missCount: 0 })));
+  Array.from({ length: 4 }, () => freshCell()));
+
+type WatchedWord = { word: ScoredWord; board: Tile[][]; changedFrames: number };
+let watchedWord: WatchedWord | null = null;
+let scanRevision = 0;
+
+function completeBoard(board: Tile[][]): boolean {
+  return board.every(row => row.every(tile => Boolean(tile.letter)));
+}
+
+function resetBoard() {
+  scanRevision++;
+  watchedWord = null;
+  canConfirmPlay.value = false;
+  for (let r = 0; r < 4; r++) {
+    for (let c = 0; c < 4; c++)
+      cellState[r]![c] = freshCell();
+  }
+  tiles.value = null;
+  allWords.value = [];
+  bestWord.value = null;
+  clearBoardDisplay("Looking for board…");
+}
+
+function watchWord(word: ScoredWord) {
+  if (!tiles.value || !completeBoard(tiles.value) || manualMode.value)
+    return;
+  scanRevision++;
+  watchedWord = {
+    word,
+    board: tiles.value.map(row => row.map(tile => ({ ...tile }))),
+    changedFrames: 0,
+  };
+  canConfirmPlay.value = true;
+  for (const row of cellState) {
+    for (const cell of row)
+      cell.locked = true;
+  }
+}
+
+function selectWord(word: ScoredWord) {
+  bestWord.value = word;
+  watchWord(word);
+}
+
+function selectNextWord() {
+  const index = allWords.value.findIndex(word => word.word === bestWord.value?.word);
+  const next = allWords.value[index + 1];
+  if (next)
+    selectWord(next);
+}
+
+function playWord() {
+  if (!watchedWord)
+    return;
+  const board = applyGravity(watchedWord.board, watchedWord.word.path);
+  scanRevision++;
+  watchedWord = null;
+  canConfirmPlay.value = false;
+  for (let r = 0; r < 4; r++) {
+    for (let c = 0; c < 4; c++) {
+      const state = freshCell();
+      state.committed = board[r]![c]!.letter;
+      state.locked = Boolean(state.committed);
+      cellState[r]![c] = state;
+    }
+  }
+  tiles.value = board;
+  clearBoardDisplay("Reading new letters…");
+  solveCurrent();
+}
+
+function toggleManualMode() {
+  resetBoard();
+  manualMode.value = !manualMode.value;
+}
 
 // Vote a new read into the cell. Returns the committed letter (or '' if none yet).
 function voteCell(r: number, c: number, read: string): string {
@@ -76,7 +155,7 @@ let scanTimer: ReturnType<typeof setInterval> | null = null;
 // the path drawing and the word card so stale results never linger while
 // the game is loading a new board or solving a different word.
 const boardVisible = ref(false);
-const nextWords = computed(() => allWords.value.slice(1, 3));
+const nextWords = computed(() => allWords.value.filter(word => word.word !== bestWord.value?.word).slice(0, 2));
 
 const bestPath = computed(() => {
   if (!bestWord.value || !detection.value || !canvasEl.value)
@@ -126,9 +205,31 @@ async function scanTick() {
     return;
 
   statusLine.value = "Looking for board…";
-  const result = await detectGrid(frame);
+  const revision = scanRevision;
+  const readCells = cellState.map((row, r) => row.map((state, c) =>
+    !state.locked || Boolean(watchedWord?.word.path.some(step => step.row === r && step.col === c))));
+  const hasSkippedCells = readCells.some(row => row.some(read => !read));
+  const result = await detectGrid(frame, hasSkippedCells ? readCells : undefined);
+  if (revision !== scanRevision || manualMode.value)
+    return;
   if (!result) {
+    if (watchedWord)
+      watchedWord.changedFrames = 0;
     clearBoardDisplay("Board not visible");
+    return;
+  }
+
+  if (watchedWord) {
+    const changed = result.inkCoverage < 0.5
+      && wordPathChanged(watchedWord.board, result.tiles, watchedWord.word.path);
+    watchedWord.changedFrames = changed ? watchedWord.changedFrames + 1 : 0;
+    if (watchedWord.changedFrames >= CONSENSUS_FRAMES) {
+      playWord();
+      return;
+    }
+    detection.value = { corners: result.corners };
+    boardVisible.value = !changed;
+    statusLine.value = changed ? "Board changing…" : "Watching selected word";
     return;
   }
 
@@ -136,16 +237,22 @@ async function scanTick() {
   // only change after CONSENSUS_FRAMES consecutive matching reads.
   let readCount = 0;
   let recentlyMissed = 0;
+  let unlocked = 0;
   const committedTiles: Tile[][] = [];
   for (let r = 0; r < 4; r++) {
     const rowTiles: Tile[] = [];
     for (let c = 0; c < 4; c++) {
       const read = result.tiles[r]![c]!.letter;
-      if (read)
-        readCount++;
-      const committed = voteCell(r, c, read);
-      if (cellState[r]![c]!.missCount >= QUICK_CLEAR_MISSES)
-        recentlyMissed++;
+      const state = cellState[r]![c]!;
+      let committed = state.committed;
+      if (!state.locked) {
+        unlocked++;
+        if (read)
+          readCount++;
+        committed = voteCell(r, c, read);
+        if (state.missCount >= QUICK_CLEAR_MISSES)
+          recentlyMissed++;
+      }
       rowTiles.push({ letter: committed, row: r, col: c });
     }
     committedTiles.push(rowTiles);
@@ -160,7 +267,8 @@ async function scanTick() {
   // go mostly dark in the binary image, so an occluded board has high
   // coverage. Never clear results while the user is actually tracing.
   const occluded = result.inkCoverage >= 0.5;
-  if (!occluded && (recentlyMissed >= QUICK_CLEAR_RATIO * 16 || readCount < 3)) {
+  if (!occluded && unlocked > 0
+    && (recentlyMissed >= QUICK_CLEAR_RATIO * unlocked || readCount < Math.min(3, unlocked))) {
     clearBoardDisplay("Board changing…");
     return;
   }
@@ -181,6 +289,9 @@ async function scanTick() {
   tiles.value = committedTiles;
   statusLine.value = "Solving…";
   solveCurrent();
+  if (bestWord.value && completeBoard(committedTiles)) {
+    watchWord(bestWord.value);
+  }
   statusLine.value = `Board locked — ${committedTiles.flat().map(t => t.letter || "?").join(" ")}`;
 }
 
@@ -228,10 +339,18 @@ if (typeof document !== "undefined") {
       </h1>
       <div class="flex gap-2 items-center">
         <span v-if="scanning" class="loading loading-spinner loading-sm text-primary" />
+        <button
+          class="btn btn-sm btn-ghost"
+          title="Reset board memory"
+          aria-label="Reset board memory"
+          @click="resetBoard"
+        >
+          <Icon name="tabler:refresh" />
+        </button>
         <button class="btn btn-sm btn-ghost" @click="switchCamera">
           <Icon name="tabler:camera-rotate" />
         </button>
-        <button class="btn btn-sm btn-ghost" @click="manualMode = !manualMode">
+        <button class="btn btn-sm btn-ghost" @click="toggleManualMode">
           <Icon name="tabler:keyboard" />
         </button>
       </div>
@@ -318,17 +437,31 @@ if (typeof document !== "undefined") {
 
     <!-- Result: #1 word large, next 2 smaller below it. Hidden entirely
          while the board is mid-load/mid-solve (boardVisible=false). -->
-    <div v-if="bestWord && boardVisible" class="card bg-base-200 border-2 border-base-300 p-4">
-      <div class="flex items-baseline gap-2">
+    <div v-if="bestWord && (boardVisible || canConfirmPlay)" class="card bg-base-200 border-2 border-base-300 p-4">
+      <div class="flex items-baseline gap-2 flex-wrap">
         <span class="text-3xl font-bold tracking-widest">{{ bestWord.word.toUpperCase() }}</span>
         <span class="text-lg text-base-content/70">{{ bestWord.score }} pts</span>
+        <button v-if="canConfirmPlay" class="btn btn-xs btn-outline ml-auto" @click="playWord">
+          Played it
+        </button>
+        <button
+          v-if="canConfirmPlay"
+          class="btn btn-xs btn-outline"
+          :disabled="allWords.findIndex(word => word.word === bestWord?.word) >= allWords.length - 1"
+          @click="selectNextWord"
+        >
+          Use next word
+        </button>
       </div>
       <div
         v-for="w in nextWords"
         :key="w.word"
         class="flex items-baseline gap-2 mt-1 opacity-80"
       >
-        <span class="text-xl font-semibold tracking-wider">{{ w.word.toUpperCase() }}</span>
+        <button v-if="canConfirmPlay" class="text-xl font-semibold tracking-wider underline" @click="selectWord(w)">
+          {{ w.word.toUpperCase() }}
+        </button>
+        <span v-else class="text-xl font-semibold tracking-wider">{{ w.word.toUpperCase() }}</span>
         <span class="text-sm text-base-content/70">{{ w.score }} pts</span>
       </div>
     </div>
