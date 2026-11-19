@@ -4,29 +4,43 @@ Look at the [Nuxt documentation](https://nuxt.com/docs/getting-started/introduct
 
 ## Words scanner
 
-The scanner keeps the existing two-frame letter consensus. Once it has a
-complete board, it watches the suggested word and assumes it was played when
-every cell on that path has a different readable letter in two consecutive
-unobstructed scans. Use **Played it** if a new or falling tile has the same
-letter as before. Use **Use next word** or tap a backup before playing it.
+The camera preview stays live while the scanner captures a snapshot every
+500 ms. It detects the tile grid, corrects perspective, and reads all 16
+cells. When processing takes longer than 500 ms, older pending snapshots are
+discarded; consensus uses consecutive **processed** snapshots.
 
-For per-cell OCR, the selected letter component is cropped before white
-padding is added, then binarized. This keeps scoring dots below the letter out
-of the padded image. Dots touching the letter may still be included.
+A letter is confirmed after two matching, sufficiently confident reads.
+Previously confirmed letters survive a different single read or two unreadable
+reads; three consecutive unreadable reads clear the cell. Losing the board
+clears its memory. Words are recalculated from confirmed cells, including on
+partial boards, without waiting for a played word's tiles to change. Use
+**Reset board memory** to clear a persistent wrong read.
 
-After a play, unused tiles keep their order as they fall. Their letters are
-locked at the predicted positions, and OCR reads the new cells at the top.
-The scanner also reads the selected word's path to detect the next play.
-Use **Reset board memory** after a reshuffle, a wrong read, or a play the app
-did not track. Automatic recognition cannot distinguish a replacement tile
-that happens to have the same letter, and a wrong starting read can persist
-until reset.
+The suggested set maximizes the combined score of non-overlapping words. Each
+path has its own gradient, starting at its marked solid-color circle. Words
+are listed roughly top to bottom. Gravity may still move remaining paths, so
+rescan after every play. The full word list remains available separately; the
+best individual word need not be part of the best combined set. A Q tile
+spells QU and scores 10 points; enter Q in manual mode.
 
-Gravity checks can be run with:
+Run scanner and gravity checks with:
 
 ```bash
-node --experimental-strip-types scripts/test-gravity.mts
+node --experimental-strip-types --test scripts/test-scanner.mts scripts/test-gravity.mts
 ```
+
+To test the eight photos, start the development server and sign in, then run
+the following in that page's browser developer console. Replace the path with
+the absolute project path, using `/` in the URL:
+
+```js
+await (await import("/_nuxt/@fs/C:/absolute/path/to/words/scripts/test-photos.ts")).testPhotos();
+```
+
+The photo test checks two repeated still-image reads, the expected 16 letters,
+and TORPOR as the best individual word. It also checks a blank image and a
+synthetic QU tile, and reports processing time. It does not replace testing
+with a moving camera or real falling tiles.
 
 ## Repository Structure
 

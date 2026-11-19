@@ -52,6 +52,8 @@ export const SCRABBLE_VALUES: Record<string, number> = {
 export function letterValue(letter: string): number {
   if (!letter)
     return 0;
+  if (letter.toUpperCase() === "QU")
+    return SCRABBLE_VALUES.Q!;
   return SCRABBLE_VALUES[letter.toUpperCase()] ?? 0;
 }
 
@@ -106,28 +108,33 @@ function inBounds(r: number, c: number) {
  * Tiles: 4x4 array of { letter }.
  * trie: pre-built dictionary trie.
  */
-export function solveBoard(tiles: Tile[][], trie: Trie): ScoredWord[] {
-  const found = new Map<string, ScoredWord>(); // dedupe by word string
+function findWordPaths(tiles: Tile[][], trie: Trie): ScoredWord[] {
+  const found: ScoredWord[] = [];
   const visited: boolean[][] = Array.from({ length: 4 }, () => Array.from<boolean>({ length: 4 }).fill(false));
 
   function dfs(r: number, c: number, node: TrieNode, path: PathStep[], score: number) {
     if (!inBounds(r, c) || visited[r]![c])
       return;
     const tile = tiles[r]![c]!;
-    const ch = tile.letter.toLowerCase();
-    const next = node.children.get(ch);
-    if (!next)
+    const letter = tile.letter.toLowerCase();
+    if (!/^(?:[a-z]|qu)$/.test(letter))
       return;
+    let next: TrieNode | undefined = node;
+    for (const ch of letter === "q" ? "qu" : letter) {
+      next = next.children.get(ch);
+      if (!next)
+        return;
+    }
 
     const newPath = [...path, { row: r, col: c }];
     const newScore = score + letterValue(tile.letter);
 
     if (next.isWord) {
-      const word = newPath.map(p => tiles[p.row]![p.col]!.letter.toLowerCase()).join("");
-      const existing = found.get(word);
-      if (!existing || newScore > existing.score) {
-        found.set(word, { word, score: newScore, path: newPath });
-      }
+      const word = newPath.map((p) => {
+        const value = tiles[p.row]![p.col]!.letter.toLowerCase();
+        return value === "q" ? "qu" : value;
+      }).join("");
+      found.push({ word, score: newScore, path: newPath });
     }
 
     visited[r]![c] = true;
@@ -143,12 +150,65 @@ export function solveBoard(tiles: Tile[][], trie: Trie): ScoredWord[] {
     }
   }
 
-  return Array.from(found.values()).sort((a, b) => {
+  return found.sort((a, b) => {
     if (b.score !== a.score)
       return b.score - a.score;
     if (b.word.length !== a.word.length)
       return b.word.length - a.word.length;
     return a.word.localeCompare(b.word);
+  });
+}
+
+export function solveBoard(tiles: Tile[][], trie: Trie): ScoredWord[] {
+  const found = new Map<string, ScoredWord>();
+  for (const word of findWordPaths(tiles, trie)) {
+    if (!found.has(word.word))
+      found.set(word.word, word);
+  }
+  return Array.from(found.values());
+}
+
+/** Maximize total score over all paths, including alternate paths for the same word. */
+export function selectWordSet(tiles: Tile[][], trie: Trie): ScoredWord[] {
+  const byMask = new Map<number, ScoredWord>();
+  for (const word of findWordPaths(tiles, trie)) {
+    const mask = word.path.reduce((bits, step) => bits | (1 << (step.row * 4 + step.col)), 0);
+    if (!byMask.has(mask))
+      byMask.set(mask, word);
+  }
+  const candidates = Array.from(byMask, ([mask, word]) => ({ mask, word }));
+  const byCell = Array.from({ length: 16 }, () => [] as typeof candidates);
+  for (const candidate of candidates) {
+    for (let i = 0; i < 16; i++) {
+      if (candidate.mask & (1 << i))
+        byCell[i]!.push(candidate);
+    }
+  }
+  const memo = new Map<number, { score: number; words: ScoredWord[] }>();
+  function choose(available: number): { score: number; words: ScoredWord[] } {
+    if (!available)
+      return { score: 0, words: [] };
+    const cached = memo.get(available);
+    if (cached)
+      return cached;
+    const bit = available & -available;
+    const cell = Math.log2(bit);
+    let best = choose(available ^ bit);
+    for (const candidate of byCell[cell]!) {
+      if ((candidate.mask & available) !== candidate.mask)
+        continue;
+      const rest = choose(available ^ candidate.mask);
+      const score = candidate.word.score + rest.score;
+      if (score > best.score)
+        best = { score, words: [candidate.word, ...rest.words] };
+    }
+    memo.set(available, best);
+    return best;
+  }
+  return [...choose(0xFFFF).words].sort((a, b) => {
+    const aRow = a.path.reduce((sum, step) => sum + step.row, 0) / a.path.length;
+    const bRow = b.path.reduce((sum, step) => sum + step.row, 0) / b.path.length;
+    return aRow - bRow || b.score - a.score || a.word.localeCompare(b.word);
   });
 }
 
