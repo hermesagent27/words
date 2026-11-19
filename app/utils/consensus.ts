@@ -2,6 +2,17 @@ import type { ScoredWord, Tile } from "./solver";
 
 type CellState = { candidate: string; count: number; committed: string; misses: number };
 
+export function hasEnoughReadableTiles(board: Tile[][]): boolean {
+  return board.flat().filter(tile => tile.letter).length >= 13;
+}
+
+export function currentConfirmedBoard(board: Tile[][], reads: Tile[][]): Tile[][] {
+  return board.map((row, r) => row.map((tile, c) => ({
+    ...tile,
+    letter: tile.letter === reads[r]![c]!.letter ? tile.letter : "",
+  })));
+}
+
 export function createBoardConsensus() {
   const cells: CellState[][] = Array.from({ length: 4 }, () =>
     Array.from({ length: 4 }, () => ({ candidate: "", count: 0, committed: "", misses: 0 })));
@@ -53,12 +64,12 @@ export function createWordChangeMonitor(board: Tile[][], words: ScoredWord[]) {
   const paths = words.map(word => word.path.map(step => ({ ...step })));
   const changed = paths.map(() => false);
 
-  function update(observed: Tile[][]) {
+  function update(observed: Tile[][], reads: Tile[][] = observed) {
     for (let i = 0; i < paths.length; i++) {
-      if (!changed[i]) {
+      if (!changed[i] && paths[i]!.every(({ row, col }) => reads[row]![col]!.letter)) {
         changed[i] = paths[i]!.some(({ row, col }) => {
           const letter = observed[row]![col]!.letter;
-          return Boolean(letter) && letter !== original[row]![col];
+          return Boolean(letter) && letter === reads[row]![col]!.letter && letter !== original[row]![col];
         });
       }
     }

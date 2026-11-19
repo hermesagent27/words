@@ -3,7 +3,7 @@ import type { Point } from "~/utils/boardGeometry";
 import type { ScoredWord, Tile } from "~/utils/solver";
 
 import { projectBoardPoint } from "~/utils/boardGeometry";
-import { createBoardConsensus, createWordChangeMonitor } from "~/utils/consensus";
+import { createBoardConsensus, createWordChangeMonitor, currentConfirmedBoard, hasEnoughReadableTiles } from "~/utils/consensus";
 import { selectWordSet } from "~/utils/solver";
 import { createWordSpeech } from "~/utils/wordSpeech";
 
@@ -185,14 +185,14 @@ async function processSnapshots() {
         statusLine.value = frozen.value ? "Board obstructed — keeping snapshot" : "Board obstructed — waiting for a clear view";
         continue;
       }
-      if (frozen.value && result.tiles.some(row => row.some(tile => !tile.letter))) {
+      if (frozen.value && !hasEnoughReadableTiles(result.tiles)) {
         consensus.interrupt();
         statusLine.value = "Waiting for a clear, readable board — keeping snapshot";
         continue;
       }
-      const board = consensus.update(result.tiles);
+      let board = consensus.update(result.tiles);
       if (monitor) {
-        const progress = monitor.update(board);
+        const progress = monitor.update(board, result.tiles);
         if (!progress.complete) {
           statusLine.value = `Board locked — ${progress.count}/${progress.total} suggested words changed`;
           continue;
@@ -200,13 +200,16 @@ async function processSnapshots() {
         speech?.stop();
         monitor = null;
         frozen.value = null;
+        consensus.reset();
+        board = consensus.update(result.tiles);
       }
       detection.value = result.corners;
-      solveCurrent(board);
-      const count = board.flat().filter(tile => tile.letter).length;
+      const currentBoard = currentConfirmedBoard(board, result.tiles);
+      solveCurrent(currentBoard);
+      const count = currentBoard.flat().filter(tile => tile.letter).length;
       statusLine.value = `Reading board: ${count}/16 confirmed`;
-      if (count === 16 && selectedWords.value.length)
-        lockSnapshot(snapshot.frame, board);
+      if (hasEnoughReadableTiles(currentBoard) && selectedWords.value.length)
+        lockSnapshot(snapshot.frame, currentBoard);
     }
   }
   finally {

@@ -3,7 +3,7 @@ import { test } from "node:test";
 
 import { projectBoardPoint } from "../app/utils/boardGeometry.ts";
 import { isBoardObstructed } from "../app/utils/boardObstruction.ts";
-import { createBoardConsensus, createWordChangeMonitor } from "../app/utils/consensus.ts";
+import { createBoardConsensus, createWordChangeMonitor, currentConfirmedBoard, hasEnoughReadableTiles } from "../app/utils/consensus.ts";
 import { selectWordSet, solveBoard, Trie } from "../app/utils/solver.ts";
 import { createWordSpeech } from "../app/utils/wordSpeech.ts";
 
@@ -67,6 +67,13 @@ test("an interrupted scan preserves confirmed letters but breaks consecutive vot
   assert.equal(consensus.update(b)[0]![0]!.letter, "B");
 });
 
+test("a snapshot needs 13 confirmed tiles that match the current reads", () => {
+  const confirmed = board(["ABCD", "EFGH", "IJKL", "M..."]);
+  assert.equal(hasEnoughReadableTiles(confirmed), true);
+  assert.equal(hasEnoughReadableTiles(board(["ABCD", "EFGH", "IJKL", "...."])), false);
+  assert.equal(hasEnoughReadableTiles(currentConfirmedBoard(confirmed, board(["ABCD", "EFGH", "IJKL", "X..."]))), false);
+});
+
 test("large skin-colored or dark patches block a board, but small glyphs do not", () => {
   const size = 400;
   const pixels = new Uint8Array(size * size * 4).fill(240);
@@ -109,6 +116,16 @@ test("locked words refresh only after every path has a confirmed changed tile", 
   assert.equal(createWordChangeMonitor(original, []).update(original).complete, false);
 });
 
+test("locked paths require readable current tiles and matching confirmed changes", () => {
+  const original = board(["ABCD", "EFGH", "IJKL", "MNOP"]);
+  const words = [{ word: "abc", score: 3, path: [{ row: 0, col: 0 }, { row: 0, col: 1 }] }];
+  const monitor = createWordChangeMonitor(original, words);
+  const changed = board(["XBCD", "EFGH", "IJKL", "MNOP"]);
+  assert.equal(monitor.update(changed, board(["X.CD", "EFGH", "IJKL", "MNOP"])).complete, false);
+  assert.equal(monitor.update(changed, original).complete, false);
+  assert.equal(monitor.update(changed, board(["XBCD", "EFGH", "IJKL", "M..."])).complete, true);
+});
+
 test("overlay projection follows perspective rather than bilinear interpolation", () => {
   const corners = [{ x: 0, y: 0 }, { x: 100, y: 0 }, { x: 80, y: 100 }, { x: 20, y: 100 }];
   assert.deepEqual(projectBoardPoint(corners, 0, 0), corners[0]);
@@ -118,32 +135,48 @@ test("overlay projection follows perspective rather than bilinear interpolation"
   assert.ok(Math.abs(center.y - 62.5) < 1e-8);
 });
 
-test("speech reads the supplied order and cancels before replacing or stopping it", () => {
-  type Request = { text: string; onerror: SpeechSynthesisUtterance["onerror"] };
+test("speech reads slowly in order with a 300ms pause and cancels pending words", (t) => {
+  type Request = { text: string; rate: number; onend: SpeechSynthesisUtterance["onend"]; onerror: SpeechSynthesisUtterance["onerror"] };
+  t.mock.timers.enable({ apis: ["setTimeout"] });
   const actions: string[] = [];
+  const requests: Request[] = [];
   const speech = createWordSpeech(
     {
       cancel: () => { actions.push("cancel"); },
-      speak: (request: Request) => { actions.push(request.text); },
+      speak: (request: Request) => {
+        actions.push(request.text);
+        requests.push(request);
+      },
     },
-    (text: string): Request => ({ text, onerror: null }),
+    (text: string): Request => ({ text, rate: 1, onend: null, onerror: null }),
     message => assert.fail(message),
   );
   speech.speak(["now", "rut", "our"]);
+  assert.equal(requests[0]!.rate, 0.85);
+  requests[0]!.onend!.call({} as SpeechSynthesisUtterance, {} as SpeechSynthesisEvent);
+  t.mock.timers.tick(299);
+  assert.deepEqual(actions, ["cancel", "now"]);
+  t.mock.timers.tick(1);
+  assert.deepEqual(actions, ["cancel", "now", "rut"]);
+  requests[1]!.onend!.call({} as SpeechSynthesisUtterance, {} as SpeechSynthesisEvent);
   speech.speak(["new", "words"]);
+  t.mock.timers.tick(300);
+  assert.deepEqual(actions, ["cancel", "now", "rut", "cancel", "new"]);
+  requests[2]!.onend!.call({} as SpeechSynthesisUtterance, {} as SpeechSynthesisEvent);
   speech.stop();
-  assert.deepEqual(actions, ["cancel", "now. rut. our", "cancel", "new. words", "cancel"]);
+  t.mock.timers.tick(300);
+  assert.deepEqual(actions, ["cancel", "now", "rut", "cancel", "new", "cancel"]);
 });
 
 test("speech reports failures instead of silently appearing to work", () => {
-  type Request = { text: string; onerror: SpeechSynthesisUtterance["onerror"] };
+  type Request = { text: string; rate: number; onend: SpeechSynthesisUtterance["onend"]; onerror: SpeechSynthesisUtterance["onerror"] };
   const errors: string[] = [];
   const speech = createWordSpeech(
     {
       cancel: () => {},
       speak: (_request: Request) => { throw new Error("blocked"); },
     },
-    (text: string): Request => ({ text, onerror: null }),
+    (text: string): Request => ({ text, rate: 1, onend: null, onerror: null }),
     message => errors.push(message),
   );
   speech.speak(["cat"]);

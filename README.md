@@ -12,15 +12,16 @@ than 500 ms, older pending snapshots are discarded; consensus uses consecutive
 A letter is confirmed after two matching, sufficiently confident reads.
 Previously confirmed letters survive a different single read or two unreadable
 reads; three consecutive unreadable reads clear the cell. Partial boards can
-show preliminary words. Once all 16 letters are confirmed and there are
+show preliminary words. Once at least 13 letters are confirmed and there are
 suggestions, the app freezes that snapshot and its word paths while continuing
 to monitor the camera. It refreshes after at least one confirmed tile changes
 on each suggested path, even if a previously suggested word can be made again.
 If the board is temporarily hidden, the frozen snapshot stays visible. Use
 **Reset board memory** to release it or clear a persistent wrong read.
 The processed-snapshot counter shows that monitoring is continuing. The app
-pauses change tracking when a board appears obstructed or any tile is
-unreadable, and waits for clear, consecutive reads before updating again.
+pauses change tracking when a board appears obstructed or fewer than 13 tiles
+are readable. A suggested path only registers a change when all its tiles are
+readable and the changed letter is confirmed in consecutive scans.
 Obstruction detection is heuristic and may not recognize every hand or
 lighting condition.
 
@@ -39,7 +40,8 @@ screen.
 
 Use the speaker button to enable or mute speech. When enabled, the app reads
 each locked board's suggested words once in their displayed order; enabling it
-on an already locked board reads that board immediately. Resetting, muting, or
+on an already locked board reads that board immediately. Words are spoken
+slightly slower, with a 300 ms pause between them. Resetting, muting, or
 refreshing a locked board stops the previous speech. Speech is off initially
 because browsers may require a user gesture, and availability depends on the
 browser and installed voices.
