@@ -23,7 +23,7 @@ async function login() {
     <form class="card bg-base-100 w-full max-w-sm shadow-xl" @submit.prevent="login">
       <div class="card-body">
         <h1 class="card-title text-2xl mb-4">
-          Budget Tracker
+          Words
         </h1>
         <input
           v-model="password"
