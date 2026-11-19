@@ -3,13 +3,15 @@ import type { Point } from "~/utils/boardGeometry";
 import type { ScoredWord, Tile } from "~/utils/solver";
 
 import { projectBoardPoint } from "~/utils/boardGeometry";
-import { createBoardConsensus } from "~/utils/consensus";
+import { createBoardConsensus, createWordChangeMonitor } from "~/utils/consensus";
 import { selectWordSet, solveBoard } from "~/utils/solver";
 
 const { trie, error: dictionaryError, load: loadWords } = useWordList();
 const { videoEl, canvasEl, ready: cameraReady, error: cameraError, start: startCamera, stop: stopCamera, switchCamera, captureFrame } = useCamera();
 const { error: ocrError, detectGrid } = useOcr();
 const consensus = createBoardConsensus();
+const snapshotEl = ref<HTMLCanvasElement | null>(null);
+const frozen = ref<{ width: number; height: number } | null>(null);
 
 const manualMode = ref(false);
 const manualTiles = ref<Tile[][]>(Array.from({ length: 4 }, (_, row) =>
@@ -22,24 +24,24 @@ const selectedWords = ref<ScoredWord[]>([]);
 const statusLine = ref("Starting…");
 const lastSignature = ref("");
 const colors = [
-  ["#f43f5e", "#fbbf24"],
-  ["#22c55e", "#06b6d4"],
-  ["#a855f7", "#ec4899"],
-  ["#3b82f6", "#a3e635"],
-  ["#f97316", "#facc15"],
-  ["#14b8a6", "#818cf8"],
-  ["#e11d48", "#c084fc"],
-  ["#64748b", "#f8fafc"],
+  ["#ef4444", "#f97316"],
+  ["#facc15", "#84cc16"],
+  ["#16a34a", "#14b8a6"],
+  ["#7dd3fc", "#a855f7"],
 ];
+const defaultColors = ["#000000", "#000000"];
 let scanTimer: ReturnType<typeof setInterval> | null = null;
 let revision = 0;
 let working = false;
 let pending: { frame: HTMLCanvasElement; revision: number } | null = null;
+let monitor: ReturnType<typeof createWordChangeMonitor> | null = null;
 
 function resetBoard() {
   revision++;
   pending = null;
   consensus.reset();
+  frozen.value = null;
+  monitor = null;
   detection.value = null;
   tiles.value = null;
   allWords.value = [];
@@ -87,7 +89,7 @@ const paths = computed(() => {
 });
 
 function colorAt(index: number, fraction: number): string {
-  const pair = colors[index % colors.length]!;
+  const pair = colors[index] ?? defaultColors;
   const from = pair[0]!;
   const to = pair[1]!;
   const channels = [1, 3, 5].map((offset) => {
@@ -96,6 +98,25 @@ function colorAt(index: number, fraction: number): string {
     return Math.round(a + (b - a) * fraction);
   });
   return `rgb(${channels.join(",")})`;
+}
+
+function lockSnapshot(frame: HTMLCanvasElement, board: Tile[][]) {
+  const canvas = snapshotEl.value;
+  if (!canvas) {
+    statusLine.value = "Unable to display snapshot";
+    return;
+  }
+  canvas.width = frame.width;
+  canvas.height = frame.height;
+  const context = canvas.getContext("2d");
+  if (!context) {
+    statusLine.value = "Unable to display snapshot";
+    return;
+  }
+  context.drawImage(frame, 0, 0);
+  frozen.value = { width: frame.width, height: frame.height };
+  monitor = createWordChangeMonitor(board, selectedWords.value);
+  statusLine.value = `Board locked — 0/${selectedWords.value.length} suggested words changed`;
 }
 
 function startScanning() {
@@ -146,6 +167,10 @@ async function processSnapshots() {
         continue;
       if (!result) {
         consensus.reset();
+        if (frozen.value) {
+          statusLine.value = ocrError.value ? "Scan failed — keeping snapshot" : "Board not visible — keeping snapshot";
+          continue;
+        }
         tiles.value = null;
         allWords.value = [];
         selectedWords.value = [];
@@ -154,11 +179,22 @@ async function processSnapshots() {
         statusLine.value = ocrError.value ? "Scan failed" : "Board not visible";
         continue;
       }
-      detection.value = result.corners;
       const board = consensus.update(result.tiles);
+      if (monitor) {
+        const progress = monitor.update(board);
+        if (!progress.complete) {
+          statusLine.value = `Board locked — ${progress.count}/${progress.total} suggested words changed`;
+          continue;
+        }
+        monitor = null;
+        frozen.value = null;
+      }
+      detection.value = result.corners;
       solveCurrent(board);
       const count = board.flat().filter(tile => tile.letter).length;
       statusLine.value = `Reading board: ${count}/16 confirmed`;
+      if (count === 16 && selectedWords.value.length)
+        lockSnapshot(snapshot.frame, board);
     }
   }
   finally {
@@ -241,13 +277,20 @@ onUnmounted(() => {
           autoplay
           playsinline
           muted
+          class="rounded-lg bg-black"
+          :class="frozen ? 'absolute w-px h-px opacity-0 pointer-events-none' : 'w-full'"
+        />
+        <canvas
+          v-show="frozen"
+          ref="snapshotEl"
           class="w-full rounded-lg bg-black"
+          aria-label="Locked board snapshot"
         />
         <canvas ref="canvasEl" class="hidden" />
         <svg
           v-if="detection"
           class="absolute inset-0 w-full h-full pointer-events-none"
-          :viewBox="`0 0 ${canvasEl?.width || 1} ${canvasEl?.height || 1}`"
+          :viewBox="`0 0 ${frozen?.width || canvasEl?.width || 1} ${frozen?.height || canvasEl?.height || 1}`"
           preserveAspectRatio="none"
         >
           <polygon
@@ -286,7 +329,7 @@ onUnmounted(() => {
               v-if="path[0]"
               :cx="path[0].x"
               :cy="path[0].y"
-              r="10"
+              r="24"
               :fill="colorAt(index, 0)"
               stroke="white"
               stroke-width="3"
@@ -317,7 +360,7 @@ onUnmounted(() => {
         Suggested words (top to bottom)
       </h2>
       <p class="text-sm">
-        Rescan after each play; falling tiles can change remaining paths.
+        The snapshot stays until each suggested word changes. Falling tiles can change remaining paths.
       </p>
       <div v-for="(word, i) in selectedWords" :key="`${word.word}-${i}`" class="flex items-baseline gap-2 mt-1">
         <span :style="{ color: colorAt(i, 0) }" aria-hidden="true">●</span>

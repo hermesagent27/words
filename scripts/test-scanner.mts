@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 
 import { projectBoardPoint } from "../app/utils/boardGeometry.ts";
-import { createBoardConsensus } from "../app/utils/consensus.ts";
+import { createBoardConsensus, createWordChangeMonitor } from "../app/utils/consensus.ts";
 import { selectWordSet, solveBoard, Trie } from "../app/utils/solver.ts";
 
 function board(rows: string[]) {
@@ -51,6 +51,27 @@ test("consensus requires consecutive matching reads and retains transient misses
   assert.equal(consensus.update(blank)[0]![0]!.letter, "B");
   assert.equal(consensus.update(blank)[0]![0]!.letter, "B");
   assert.equal(consensus.update(blank)[0]![0]!.letter, "");
+});
+
+test("locked words refresh only after every path has a confirmed changed tile", () => {
+  const original = board(["ABCD", "EFGH", "IJKL", "MNOP"]);
+  const words = [
+    { word: "abc", score: 3, path: [{ row: 0, col: 0 }, { row: 0, col: 1 }] },
+    { word: "abc", score: 3, path: [{ row: 1, col: 0 }, { row: 1, col: 1 }] },
+  ];
+  const monitor = createWordChangeMonitor(original, words);
+  const consensus = createBoardConsensus();
+  consensus.update(original);
+  assert.deepEqual(monitor.update(consensus.update(original)), { count: 0, total: 2, complete: false });
+  const first = board(["XBCD", "EFGH", "IJKL", "MNOP"]);
+  assert.equal(monitor.update(consensus.update(first)).count, 0);
+  assert.deepEqual(monitor.update(consensus.update(first)), { count: 1, total: 2, complete: false });
+  const blank = board(["ABCD", ".FGH", "IJKL", "MNOP"]);
+  assert.equal(monitor.update(consensus.update(blank)).count, 1);
+  const second = board(["ABCD", "EYGH", "IJKL", "MNOP"]);
+  assert.equal(monitor.update(consensus.update(second)).complete, false);
+  assert.deepEqual(monitor.update(consensus.update(second)), { count: 2, total: 2, complete: true });
+  assert.equal(createWordChangeMonitor(original, []).update(original).complete, false);
 });
 
 test("overlay projection follows perspective rather than bilinear interpolation", () => {

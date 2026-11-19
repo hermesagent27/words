@@ -1,4 +1,4 @@
-import type { Tile } from "./solver";
+import type { ScoredWord, Tile } from "./solver";
 
 type CellState = { candidate: string; count: number; committed: string; misses: number };
 
@@ -39,4 +39,25 @@ export function createBoardConsensus() {
   }
 
   return { update, reset };
+}
+
+export function createWordChangeMonitor(board: Tile[][], words: ScoredWord[]) {
+  const original = board.map(row => row.map(tile => tile.letter));
+  const paths = words.map(word => word.path.map(step => ({ ...step })));
+  const changed = paths.map(() => false);
+
+  function update(observed: Tile[][]) {
+    for (let i = 0; i < paths.length; i++) {
+      if (!changed[i]) {
+        changed[i] = paths[i]!.some(({ row, col }) => {
+          const letter = observed[row]![col]!.letter;
+          return Boolean(letter) && letter !== original[row]![col];
+        });
+      }
+    }
+    const count = changed.filter(Boolean).length;
+    return { count, total: paths.length, complete: paths.length > 0 && count === paths.length };
+  }
+
+  return { update };
 }

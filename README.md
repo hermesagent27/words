@@ -4,24 +4,33 @@ Look at the [Nuxt documentation](https://nuxt.com/docs/getting-started/introduct
 
 ## Words scanner
 
-The camera preview stays live while the scanner captures a snapshot every
-500 ms. It detects the tile grid, corrects perspective, and reads all 16
-cells. When processing takes longer than 500 ms, older pending snapshots are
-discarded; consensus uses consecutive **processed** snapshots.
+The scanner captures camera snapshots every 500 ms, detects the tile grid,
+corrects perspective, and reads all 16 cells. When processing takes longer
+than 500 ms, older pending snapshots are discarded; consensus uses consecutive
+**processed** snapshots.
 
 A letter is confirmed after two matching, sufficiently confident reads.
 Previously confirmed letters survive a different single read or two unreadable
-reads; three consecutive unreadable reads clear the cell. Losing the board
-clears its memory. Words are recalculated from confirmed cells, including on
-partial boards, without waiting for a played word's tiles to change. Use
-**Reset board memory** to clear a persistent wrong read.
+reads; three consecutive unreadable reads clear the cell. Partial boards can
+show preliminary words. Once all 16 letters are confirmed and there are
+suggestions, the app freezes that snapshot and its word paths while continuing
+to monitor the camera. It refreshes after at least one confirmed tile changes
+on each suggested path, even if a previously suggested word can be made again.
+If the board is temporarily hidden, the frozen snapshot stays visible. Use
+**Reset board memory** to release it or clear a persistent wrong read.
+
+The scanner cannot tell that a replacement tile has the same letter as the
+previous tile. If that prevents a suggested path from registering a change,
+use **Reset board memory**.
 
 The suggested set maximizes the combined score of non-overlapping words. Each
-path has its own gradient, starting at its marked solid-color circle. Words
-are listed roughly top to bottom. Gravity may still move remaining paths, so
-rescan after every play. The full word list remains available separately; the
-best individual word need not be part of the best combined set. A Q tile
-spells QU and scores 10 points; enter Q in manual mode.
+path has a larger solid-color start marker: the first four fade from red to
+orange, yellow to lime, green to teal, and light blue to purple; later paths
+are black. Words are listed roughly top to bottom. Gravity may still move
+remaining paths, so the frozen paths are only a guide. The full word list
+remains available separately; the best individual word need not be part of
+the best combined set. A Q tile spells QU and scores 10 points; enter Q in
+manual mode.
 
 Run scanner and gravity checks with:
 
