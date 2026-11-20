@@ -193,7 +193,7 @@ test("speech reads only words in order, pauses between them, and cancels pending
     { word: "rut", path: [{ row: 2, col: 0 }, { row: 1, col: 2 }, { row: 1, col: 3 }] },
     { word: "our", path: [{ row: 1, col: 0 }] },
   ]);
-  assert.equal(requests[0]!.rate, 1.1);
+  assert.equal(requests[0]!.rate, 0.9);
   requests[0]!.onend!.call({} as SpeechSynthesisUtterance, {} as SpeechSynthesisEvent);
   t.mock.timers.tick(299);
   assert.deepEqual(actions, ["now"]);

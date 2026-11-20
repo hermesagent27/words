@@ -41,7 +41,7 @@ export function createWordSpeech<T extends Utterance>(
         return;
       try {
         const utterance = createUtterance(messages[index]!);
-        utterance.rate = 1.1;
+        utterance.rate = 0.9;
         active = utterance;
         utterance.onerror = (event) => {
           if (revision !== current || active !== utterance)

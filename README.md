@@ -14,9 +14,9 @@ Previously confirmed letters survive a different single read or two unreadable
 reads; three consecutive unreadable reads clear the cell. Partial boards can
 show preliminary words. Once at least 13 letters are confirmed and there are
 suggestions, the app freezes that snapshot and its word paths while continuing
-to monitor the camera. After 1.5 seconds, it clears the board memory and
+to monitor the camera. After 2 seconds, it clears the board memory and
 starts reading a fresh board; confirming and locking that board can take longer
-than 1.5 seconds. With one or two suggested words, it can also refresh sooner
+than 2 seconds. With one or two suggested words, it can also refresh sooner
 after at least one confirmed tile changes on each suggested path. With more
 than two, it can refresh sooner when one suggested path changes. This happens
 even if a previously suggested word can be made again.
@@ -49,11 +49,11 @@ Use the speaker button to enable or mute speech. When enabled, the app reads
 each locked board's suggested words once in their displayed order; enabling it
 on an already locked board reads that board immediately. Otherwise it says
 "Speech enabled" while waiting for a board. Only words are spoken, with a
-300 ms pause between them. Muting or detecting a changed suggested path stops
-the previous speech. A newly locked board is read automatically, but timed
-refreshes of the same board do not repeat or interrupt its speech. Speech is
-off initially because browsers may require a user gesture, and availability
-depends on the browser and installed voices.
+300 ms pause between them and a speech rate of 0.9. Muting or detecting a
+changed suggested path stops the previous speech. A newly locked board is read
+automatically, but timed refreshes of the same board do not repeat or interrupt
+its speech. Speech is off initially because browsers may require a user gesture,
+and availability depends on the browser and installed voices.
 
 Run scanner and gravity checks with:
 
