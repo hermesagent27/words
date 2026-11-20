@@ -32,16 +32,13 @@ not recognize every hand or lighting condition.
 The scanner cannot tell that a replacement tile has the same letter as the
 previous tile. The timed refresh still clears the board memory in that case.
 
-When the longest available word is longer than five letters, the app suggests
-only that word; if several tie, it chooses the alphabetically first one. When
-the longest word is five letters or shorter, it suggests a set of words that
-do not reuse tiles, prioritizing the greatest number of longest words, then
-more words, then more total letters. Each word scores one point per spelled
+The app suggests the longest available word followed by other playable words
+that do not reuse tiles, prioritizing longer words at each step. When words
+have the same length, it favors paths that leave room for longer additional
+words, then breaks ties alphabetically. Each word scores one point per spelled
 letter; a Q tile spells QU and therefore counts as two letters. Suggested paths
 have larger solid-color start markers. Gravity may still move remaining tiles,
 so the frozen paths are only a guide.
-Change `MAX_LENGTH_FOR_MULTIPLE_WORDS` in `app/lib/constants.mjs` to adjust the
-cutoff.
 The camera or locked snapshot and suggested words fit within the available
 screen.
 

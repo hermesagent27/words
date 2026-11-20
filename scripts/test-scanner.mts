@@ -25,7 +25,13 @@ test("Q consumes one tile but scores the spelled letters QU", () => {
   assert.deepEqual(result.map(word => [word.word, word.score, word.path.length]), [["quit", 4, 3]]);
 });
 
-test("short boards show a non-overlapping set of playable words", () => {
+test("QU tile values count both spelled letters when ranking words", () => {
+  const tiles = board([".IT.", "ABC.", "....", "...."]);
+  tiles[0]![0]!.letter = "QU";
+  assert.deepEqual(suggestedWords(tiles, dictionary("quit", "abc")).map(word => [word.word, word.score]), [["quit", 4], ["abc", 3]]);
+});
+
+test("alternate paths leave room for non-overlapping words of the same length", () => {
   const tiles = board(["CAT.", "CA..", "R...", "...."]);
   const result = suggestedWords(tiles, dictionary("cat", "car"));
   assert.deepEqual(result.map(word => word.word), ["car", "cat"]);
@@ -49,10 +55,10 @@ test("five-letter boards show non-overlapping words", () => {
   assert.equal(new Set(cells).size, cells.length);
 });
 
-test("boards with words longer than five letters show only one longest word", () => {
+test("longest words are shown with other long non-overlapping words", () => {
   const tiles = board(["ABCD", "EFGH", "IJKL", "...."]);
-  const result = suggestedWords(tiles, dictionary("abcdhl", "efgji"));
-  assert.deepEqual(result.map(word => [word.word, word.score]), [["abcdhl", 6]]);
+  const result = suggestedWords(tiles, dictionary("abcdhl", "efgji", "ef", "gji"));
+  assert.deepEqual(result.map(word => [word.word, word.score]), [["abcdhl", 6], ["efgji", 5]]);
 });
 
 test("partial boards only use confirmed letters", () => {
