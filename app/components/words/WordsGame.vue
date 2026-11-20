@@ -24,6 +24,7 @@ const tiles = ref<Tile[][] | null>(null);
 const selectedWords = ref<ScoredWord[]>([]);
 const statusLine = ref("Starting…");
 const lastSignature = ref("");
+let lastSpokenSignature = "";
 const colors = [
   ["#ef4444", "#f97316"],
   ["#facc15", "#84cc16"],
@@ -32,6 +33,7 @@ const colors = [
 ];
 const defaultColors = ["#000000", "#000000"];
 let scanTimer: ReturnType<typeof setInterval> | null = null;
+let refreshTimer: ReturnType<typeof setTimeout> | null = null;
 let revision = 0;
 let working = false;
 let pending: { frame: HTMLCanvasElement; revision: number } | null = null;
@@ -39,11 +41,10 @@ let monitor: ReturnType<typeof createWordChangeMonitor> | null = null;
 let speech: ReturnType<typeof createWordSpeech<SpeechSynthesisUtterance>> | null = null;
 
 function resetBoard() {
-  speech?.stop();
+  clearRefreshTimer();
   revision++;
   pending = null;
   consensus.reset();
-  processedSnapshots.value = 0;
   frozen.value = null;
   monitor = null;
   detection.value = null;
@@ -53,6 +54,20 @@ function resetBoard() {
   statusLine.value = "Looking for board…";
 }
 
+function clearRefreshTimer() {
+  if (refreshTimer !== null)
+    clearTimeout(refreshTimer);
+  refreshTimer = null;
+}
+
+function scheduleBoardRefresh() {
+  clearRefreshTimer();
+  refreshTimer = setTimeout(() => {
+    resetBoard();
+    captureSnapshot();
+  }, 1500);
+}
+
 function toggleSpeech() {
   if (!speech)
     return;
@@ -60,12 +75,16 @@ function toggleSpeech() {
   speechError.value = null;
   if (!speechEnabled.value) {
     speech.stop();
+    lastSpokenSignature = "";
     return;
   }
-  if (frozen.value)
+  if (frozen.value) {
     speech.speak(selectedWords.value);
-  else
+    lastSpokenSignature = lastSignature.value;
+  }
+  else {
     speech.enable();
+  }
 }
 
 function solveCurrent(board: Tile[][]) {
@@ -116,11 +135,13 @@ function lockSnapshot(frame: HTMLCanvasElement, board: Tile[][]) {
   frozen.value = { width: frame.width, height: frame.height };
   monitor = createWordChangeMonitor(board, selectedWords.value);
   statusLine.value = selectedWords.value.length > 2
-    ? "Board locked — waiting for one suggested word to change"
-    : `Board locked — 0/${selectedWords.value.length} suggested words changed`;
-  if (speechEnabled.value && speech) {
+    ? "Board locked — refreshing shortly or when a suggested word changes"
+    : `Board locked — refreshing shortly (0/${selectedWords.value.length} suggested words changed)`;
+  scheduleBoardRefresh();
+  if (speechEnabled.value && speech && lastSpokenSignature !== lastSignature.value) {
     speechError.value = null;
     speech.speak(selectedWords.value);
+    lastSpokenSignature = lastSignature.value;
   }
 }
 
@@ -129,12 +150,15 @@ function startScanning() {
     return;
   scanning.value = true;
   scanTimer = setInterval(captureSnapshot, 500);
+  if (frozen.value)
+    scheduleBoardRefresh();
 }
 
 function stopScanning() {
   if (scanTimer)
     clearInterval(scanTimer);
   scanTimer = null;
+  clearRefreshTimer();
   scanning.value = false;
   revision++;
   pending = null;
@@ -199,11 +223,13 @@ async function processSnapshots() {
         const progress = monitor.update(board, result.tiles);
         if (!progress.complete) {
           statusLine.value = progress.total > 2
-            ? "Board locked — waiting for one suggested word to change"
-            : `Board locked — ${progress.count}/${progress.total} suggested words changed`;
+            ? "Board locked — refreshing shortly or when a suggested word changes"
+            : `Board locked — refreshing shortly (${progress.count}/${progress.total} suggested words changed)`;
           continue;
         }
+        clearRefreshTimer();
         speech?.stop();
+        lastSpokenSignature = "";
         monitor = null;
         frozen.value = null;
         consensus.reset();
@@ -267,14 +293,6 @@ onUnmounted(() => {
       </h1>
       <div class="flex gap-2 items-center">
         <span v-if="scanning" class="loading loading-spinner loading-sm text-primary" />
-        <button
-          class="btn btn-sm btn-ghost"
-          title="Reset board memory"
-          aria-label="Reset board memory"
-          @click="resetBoard"
-        >
-          <Icon name="tabler:refresh" />
-        </button>
         <button
           class="btn btn-sm btn-ghost"
           :title="speechEnabled ? 'Mute spoken words' : 'Enable spoken words'"
