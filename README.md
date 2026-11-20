@@ -14,9 +14,9 @@ Previously confirmed letters survive a different single read or two unreadable
 reads; three consecutive unreadable reads clear the cell. Partial boards can
 show preliminary words. Once at least 13 letters are confirmed and there are
 suggestions, the app freezes that snapshot and its word paths while continuing
-to monitor the camera. After 1.5 seconds, it clears the board memory and
+to monitor the camera. After 2 seconds, it clears the board memory and
 starts reading a fresh board; confirming and locking that board can take longer
-than 1.5 seconds. With one or two suggested words, it can also refresh sooner
+than 2 seconds. With one or two suggested words, it can also refresh sooner
 after at least one confirmed tile changes on each suggested path. With more
 than two, it can refresh sooner when one suggested path changes. This happens
 even if a previously suggested word can be made again.

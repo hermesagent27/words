@@ -65,7 +65,7 @@ function scheduleBoardRefresh() {
   refreshTimer = setTimeout(() => {
     resetBoard();
     captureSnapshot();
-  }, 1500);
+  }, 2000);
 }
 
 function toggleSpeech() {
