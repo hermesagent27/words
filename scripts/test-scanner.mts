@@ -172,7 +172,7 @@ test("overlay projection follows perspective rather than bilinear interpolation"
   assert.ok(Math.abs(center.y - 62.5) < 1e-8);
 });
 
-test("speech reads numbers quickly in order, pauses between words, and cancels pending words", (t) => {
+test("speech reads only words in order, pauses between them, and cancels pending words", (t) => {
   type Request = { text: string; rate: number; onend: SpeechSynthesisUtterance["onend"]; onerror: SpeechSynthesisUtterance["onerror"] };
   t.mock.timers.enable({ apis: ["setTimeout"] });
   const actions: string[] = [];
@@ -196,20 +196,20 @@ test("speech reads numbers quickly in order, pauses between words, and cancels p
   assert.equal(requests[0]!.rate, 1.1);
   requests[0]!.onend!.call({} as SpeechSynthesisUtterance, {} as SpeechSynthesisEvent);
   t.mock.timers.tick(299);
-  assert.deepEqual(actions, ["now. 1 4 16."]);
+  assert.deepEqual(actions, ["now"]);
   t.mock.timers.tick(1);
-  assert.deepEqual(actions, ["now. 1 4 16.", "rut. 9 7 8."]);
+  assert.deepEqual(actions, ["now", "rut"]);
   requests[1]!.onend!.call({} as SpeechSynthesisUtterance, {} as SpeechSynthesisEvent);
   speech.speak([
     { word: "new", path: [{ row: 0, col: 1 }] },
     { word: "words", path: [{ row: 1, col: 0 }] },
   ]);
   t.mock.timers.tick(300);
-  assert.deepEqual(actions, ["now. 1 4 16.", "rut. 9 7 8.", "new. 2."]);
+  assert.deepEqual(actions, ["now", "rut", "new"]);
   requests[2]!.onend!.call({} as SpeechSynthesisUtterance, {} as SpeechSynthesisEvent);
   speech.stop();
   t.mock.timers.tick(300);
-  assert.deepEqual(actions, ["now. 1 4 16.", "rut. 9 7 8.", "new. 2."]);
+  assert.deepEqual(actions, ["now", "rut", "new"]);
 });
 
 test("speech enabled before a board is ready resumes on refreshed boards", () => {
@@ -228,17 +228,17 @@ test("speech enabled before a board is ready resumes on refreshed boards", () =>
   assert.equal(requests[0]!.text, "Speech enabled.");
   requests[0]!.onend!.call({} as SpeechSynthesisUtterance, {} as SpeechSynthesisEvent);
   speech.speak([{ word: "quit", path: [{ row: 0, col: 0 }, { row: 1, col: 1 }, { row: 2, col: 2 }] }]);
-  assert.equal(requests[1]!.text, "quit. 1 6 11.");
+  assert.equal(requests[1]!.text, "quit");
   speech.stop();
   assert.equal(cancellations, 1);
   speech.speak([{ word: "new", path: [{ row: 3, col: 3 }] }]);
   requests[1]!.onerror!.call({} as SpeechSynthesisUtterance, { error: "interrupted" } as SpeechSynthesisErrorEvent);
-  assert.equal(requests[2]!.text, "new. 16.");
+  assert.equal(requests[2]!.text, "new");
   requests[2]!.onend!.call({} as SpeechSynthesisUtterance, {} as SpeechSynthesisEvent);
   speech.stop();
   speech.speak([{ word: "next", path: [{ row: 0, col: 1 }] }]);
   assert.equal(cancellations, 1);
-  assert.equal(requests[3]!.text, "next. 2.");
+  assert.equal(requests[3]!.text, "next");
 });
 
 test("speech reports failures instead of silently appearing to work", () => {

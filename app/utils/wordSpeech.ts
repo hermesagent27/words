@@ -73,8 +73,7 @@ export function createWordSpeech<T extends Utterance>(
   }
 
   function speak(words: SpokenWord[]) {
-    speakMessages(words.map(({ word, path }) =>
-      `${word}. ${path.map(({ row, col }) => row * 4 + col + 1).join(" ")}.`));
+    speakMessages(words.map(({ word }) => word));
   }
 
   function enable() {
