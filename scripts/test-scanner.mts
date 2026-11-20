@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import { test } from "node:test";
 
 import { projectBoardPoint } from "../app/utils/boardGeometry.ts";
@@ -18,6 +19,16 @@ function dictionary(...words: string[]) {
     trie.insert(word);
   return trie;
 }
+
+test("the expanded dictionary retains existing words and solves with added words", () => {
+  const words = readFileSync(new URL("../public/dict/words.txt", import.meta.url), "utf8").trim().split(/\r?\n/);
+  const trie = new Trie();
+  for (const word of words)
+    trie.insert(word);
+  assert.equal(trie.has("begat"), true);
+  assert.equal(trie.has("operon"), true);
+  assert.equal(solveBoard(board(["WORU", "RUNT", "OORV", "TPEG"]), trie)[0]?.word, "operon");
+});
 
 test("Q consumes one tile but scores the spelled letters QU", () => {
   const tiles = board(["QIT.", "....", "....", "...."]);
@@ -193,7 +204,7 @@ test("speech reads only words in order, pauses between them, and cancels pending
     { word: "rut", path: [{ row: 2, col: 0 }, { row: 1, col: 2 }, { row: 1, col: 3 }] },
     { word: "our", path: [{ row: 1, col: 0 }] },
   ]);
-  assert.equal(requests[0]!.rate, 1.1);
+  assert.equal(requests[0]!.rate, 1);
   requests[0]!.onend!.call({} as SpeechSynthesisUtterance, {} as SpeechSynthesisEvent);
   t.mock.timers.tick(299);
   assert.deepEqual(actions, ["now"]);
@@ -241,6 +252,32 @@ test("speech enabled before a board is ready resumes on refreshed boards", () =>
   assert.equal(requests[3]!.text, "next");
 });
 
+test("speech queue reset cancels even when idle and ignores interrupted callbacks", (t) => {
+  type Request = { text: string; rate: number; onend: SpeechSynthesisUtterance["onend"]; onerror: SpeechSynthesisUtterance["onerror"] };
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  const requests: Request[] = [];
+  let cancellations = 0;
+  const speech = createWordSpeech(
+    {
+      cancel: () => { cancellations++; },
+      speak: (request: Request) => { requests.push(request); },
+    },
+    (text: string): Request => ({ text, rate: 1, onend: null, onerror: null }),
+    message => assert.fail(message),
+  );
+  speech.reset();
+  assert.equal(cancellations, 1);
+  speech.speak([{ word: "cat", path: [] }, { word: "dog", path: [] }]);
+  speech.reset();
+  requests[0]!.onend!.call({} as SpeechSynthesisUtterance, {} as SpeechSynthesisEvent);
+  requests[0]!.onerror!.call({} as SpeechSynthesisUtterance, { error: "interrupted" } as SpeechSynthesisErrorEvent);
+  t.mock.timers.tick(300);
+  assert.equal(cancellations, 2);
+  assert.equal(requests.length, 1);
+  speech.speak([{ word: "new", path: [] }]);
+  assert.equal(requests[1]!.text, "new");
+});
+
 test("speech reports failures instead of silently appearing to work", () => {
   type Request = { text: string; rate: number; onend: SpeechSynthesisUtterance["onend"]; onerror: SpeechSynthesisUtterance["onerror"] };
   const errors: string[] = [];
@@ -254,4 +291,18 @@ test("speech reports failures instead of silently appearing to work", () => {
   );
   speech.speak([{ word: "cat", path: [{ row: 0, col: 0 }] }]);
   assert.deepEqual(errors, ["Unable to start speech: blocked"]);
+});
+
+test("speech queue reset reports cancellation failures", () => {
+  const errors: string[] = [];
+  const speech = createWordSpeech(
+    {
+      cancel: () => { throw new Error("blocked"); },
+      speak: (_request: SpeechSynthesisUtterance) => {},
+    },
+    (text: string) => new SpeechSynthesisUtterance(text),
+    message => errors.push(message),
+  );
+  assert.equal(speech.reset(), false);
+  assert.deepEqual(errors, ["Unable to stop speech: blocked"]);
 });

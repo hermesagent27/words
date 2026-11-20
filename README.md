@@ -45,15 +45,25 @@ cutoff.
 The camera or locked snapshot and suggested words fit within the available
 screen.
 
+The dictionary combines the existing SCOWL common-English list (sizes 10–50)
+with lowercase alphabetic words of at least three letters from the
+[SCOWL/ESDB American English large list, release 2026.02.25](https://github.com/en-wl/wordlist-diff/blob/rel-2026.02.25/en_US-large.txt).
+It includes uncommon words, which may change the suggestions. Copyright and
+permission notices are in [SCOWL-Copyright.txt](public/dict/SCOWL-Copyright.txt)
+and [ESDB-Copyright.txt](public/dict/ESDB-Copyright.txt).
+
 Use the speaker button to enable or mute speech. When enabled, the app reads
 each locked board's suggested words once in their displayed order; enabling it
 on an already locked board reads that board immediately. Otherwise it says
-"Speech enabled" while waiting for a board. Only words are spoken, with a
-300 ms pause between them. Muting or detecting a changed suggested path stops
-the previous speech. A newly locked board is read automatically, but timed
-refreshes of the same board do not repeat or interrupt its speech. Speech is
-off initially because browsers may require a user gesture, and availability
-depends on the browser and installed voices.
+"Speech enabled" while waiting for a board. Only words are spoken, at the
+voice's normal rate, with a 300 ms pause between them. Muting or detecting a
+changed suggested path stops the previous speech. A newly locked board is read
+automatically, but timed refreshes of the same board do not repeat or interrupt
+its speech. While speech is enabled, the app clears the browser's speech queue
+every two minutes as an experimental workaround for stalls; this may interrupt
+a word and does not restart the browser's speech engine. Speech is off initially
+because browsers may require a user gesture, and availability depends on the
+browser and installed voices.
 
 Run scanner and gravity checks with:
 
@@ -70,7 +80,7 @@ await (await import("/_nuxt/@fs/C:/absolute/path/to/words/scripts/test-photos.ts
 ```
 
 The photo test checks two repeated still-image reads, the expected 16 letters,
-and TORPOR as the best individual word. It also checks a blank image, a
+and OPERON as the best individual word. It also checks a blank image, a
 synthetic QU tile and simulated obstructions, and reports processing time.
 It does not replace testing with a moving camera, a real finger or real
 falling tiles.

@@ -54,8 +54,8 @@ export async function testPhotos() {
     if (actual.join("/") !== expected.join("/"))
       throw new Error(`${photo}: expected ${expected.join("/")}, got ${actual.join("/")}`);
     const best = solveBoard(board, trie)[0];
-    if (best?.word !== "torpor")
-      throw new Error(`${photo}: expected TORPOR, got ${best?.word ?? "no word"}`);
+    if (best?.word !== "operon")
+      throw new Error(`${photo}: expected OPERON, got ${best?.word ?? "no word"}`);
     results.push({ photo, millisecondsPerScan: Math.round((performance.now() - started) / 2) });
   }
 

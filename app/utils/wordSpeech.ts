@@ -12,7 +12,7 @@ export function createWordSpeech<T extends Utterance>(
   let active: T | null = null;
   let pause: ReturnType<typeof setTimeout> | null = null;
 
-  function stop(): boolean {
+  function stop(force = false): boolean {
     revision++;
     const wasActive = active !== null;
     active = null;
@@ -20,7 +20,7 @@ export function createWordSpeech<T extends Utterance>(
       clearTimeout(pause);
       pause = null;
     }
-    if (!wasActive)
+    if (!wasActive && !force)
       return true;
     try {
       synthesis.cancel();
@@ -41,7 +41,7 @@ export function createWordSpeech<T extends Utterance>(
         return;
       try {
         const utterance = createUtterance(messages[index]!);
-        utterance.rate = 1.1;
+        utterance.rate = 1;
         active = utterance;
         utterance.onerror = (event) => {
           if (revision !== current || active !== utterance)
@@ -80,5 +80,9 @@ export function createWordSpeech<T extends Utterance>(
     speakMessages(["Speech enabled."]);
   }
 
-  return { enable, speak, stop };
+  function reset() {
+    return stop(true);
+  }
+
+  return { enable, speak, stop, reset };
 }
