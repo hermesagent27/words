@@ -26,8 +26,8 @@ The processed-snapshot counter shows that monitoring is continuing. The app
 pauses change tracking when a board appears obstructed or fewer than 13 tiles
 are readable. A suggested path only registers a change when all its tiles are
 readable and the changed letter is confirmed in consecutive scans.
-Obstruction detection is heuristic and may not recognize every hand or
-lighting condition.
+Obstruction detection checks for large dark patches, not skin color, and may
+not recognize every hand or lighting condition.
 
 The scanner cannot tell that a replacement tile has the same letter as the
 previous tile. The timed refresh still clears the board memory in that case.

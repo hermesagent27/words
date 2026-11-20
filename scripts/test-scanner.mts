@@ -95,7 +95,7 @@ test("a snapshot needs 13 confirmed tiles that match the current reads", () => {
   assert.equal(hasEnoughReadableTiles(currentConfirmedBoard(confirmed, board(["ABCD", "EFGH", "IJKL", "X..."]))), false);
 });
 
-test("large skin-colored or dark patches block a board, but small glyphs do not", () => {
+test("dark obstructions block a board, but skin-colored tiles and small glyphs do not", () => {
   const size = 400;
   const pixels = new Uint8Array(size * size * 4).fill(240);
   function patch(width: number, height: number, color: number[]) {
@@ -111,7 +111,7 @@ test("large skin-colored or dark patches block a board, but small glyphs do not"
   patch(15, 30, [25, 25, 25]);
   assert.equal(isBoardObstructed(pixels, size), false);
   patch(45, 50, [198, 130, 94]);
-  assert.equal(isBoardObstructed(pixels, size), true);
+  assert.equal(isBoardObstructed(pixels, size), false);
   patch(60, 60, [28, 28, 28]);
   assert.equal(isBoardObstructed(pixels, size), true);
 });

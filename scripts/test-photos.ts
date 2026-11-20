@@ -103,8 +103,10 @@ export async function testPhotos() {
     context.ellipse(170, 310, 35, 45, 0, 0, Math.PI * 2);
     context.fill();
     const result = await ocr.detectGrid(synthetic);
-    if (!result?.obstructed)
-      throw new Error(`Synthetic obstruction ${color} was not detected`);
+    if (!result)
+      throw new Error(`Synthetic patch ${color}: ${ocr.error.value ?? "board not detected"}`);
+    if (result.obstructed !== (color === "#1f1f1f"))
+      throw new Error(`Synthetic patch ${color} had unexpected obstruction status`);
   }
   return results;
 }
