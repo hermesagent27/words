@@ -376,7 +376,7 @@ onUnmounted(() => {
       <div v-if="selectedWords.length || tiles" class="flex shrink-0 flex-col gap-1 landscape:w-[min(36%,18rem)]">
         <div v-if="selectedWords.length" class="rounded-lg border border-base-300 bg-base-200 px-2 py-1">
           <h2 class="text-sm font-semibold">
-            Suggested words (top to bottom)
+            Longest word first
           </h2>
           <div class="flex flex-wrap gap-x-3 gap-y-1">
             <div v-for="(word, i) in selectedWords" :key="`${word.word}-${i}`" class="flex items-baseline gap-1">

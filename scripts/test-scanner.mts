@@ -19,17 +19,31 @@ function dictionary(...words: string[]) {
   return trie;
 }
 
-test("Q consumes QU in one tile and scores only Q", () => {
+test("Q consumes one tile but scores the spelled letters QU", () => {
   const tiles = board(["QIT.", "....", "....", "...."]);
   const result = solveBoard(tiles, dictionary("quit", "qit"));
-  assert.deepEqual(result.map(word => [word.word, word.score, word.path.length]), [["quit", 12, 3]]);
+  assert.deepEqual(result.map(word => [word.word, word.score, word.path.length]), [["quit", 4, 3]]);
 });
 
-test("maximum-scoring set considers alternate paths and never shares cells", () => {
+test("maximum-letter set considers alternate paths and never shares cells", () => {
   const tiles = board(["CAT.", "CA..", "R...", "...."]);
   const result = selectWordSet(tiles, dictionary("cat", "car"));
-  assert.equal(result.reduce((sum, word) => sum + word.score, 0), 10);
+  assert.equal(result.reduce((sum, word) => sum + word.score, 0), 6);
   assert.deepEqual(result.map(word => word.word).sort(), ["car", "cat"]);
+  const cells = result.flatMap(word => word.path.map(step => `${step.row},${step.col}`));
+  assert.equal(new Set(cells).size, cells.length);
+});
+
+test("equal letter totals prefer the longer word over several short words", () => {
+  const tiles = board(["TONE", "....", "....", "...."]);
+  const result = selectWordSet(tiles, dictionary("tone", "to", "ne"));
+  assert.deepEqual(result.map(word => [word.word, word.score]), [["tone", 4]]);
+});
+
+test("the longest word stays first even when shorter alternatives score more together", () => {
+  const tiles = board(["ABCD", "EFGH", "....", "...."]);
+  const result = selectWordSet(tiles, dictionary("abcdh", "abef", "cdg", "efg"));
+  assert.deepEqual(result.map(word => [word.word, word.score]), [["abcdh", 5], ["efg", 3]]);
   const cells = result.flatMap(word => word.path.map(step => `${step.row},${step.col}`));
   assert.equal(new Set(cells).size, cells.length);
 });

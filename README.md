@@ -29,12 +29,14 @@ The scanner cannot tell that a replacement tile has the same letter as the
 previous tile. If that prevents a suggested path from registering a change,
 use **Reset board memory**.
 
-The suggested set maximizes the combined score of non-overlapping words. Each
-path has a larger solid-color start marker: the first four fade from red to
-orange, yellow to lime, green to teal, and light blue to purple; later paths
-are black. Words are listed roughly top to bottom. Gravity may still move
-remaining paths, so the frozen paths are only a guide. The best individual word
-need not be part of the best combined set. A Q tile spells QU and scores 10 points.
+The suggested set always includes a longest available word, followed by
+compatible words that do not reuse its tiles or each other's. Among those sets,
+the remaining words maximize the combined number of letters. Each word scores
+one point per spelled letter; a Q tile spells QU and therefore counts as two
+letters. Words are listed longest first. Each path has a larger solid-color
+start marker: the first four fade from red to orange, yellow to lime, green to
+teal, and light blue to purple; later paths are black. Gravity may still move
+remaining paths, so the frozen paths are only a guide.
 The camera or locked snapshot and suggested words fit within the available
 screen.
 

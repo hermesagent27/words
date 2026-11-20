@@ -19,44 +19,6 @@ export type ScoredWord = {
   path: PathStep[];
 };
 
-// Standard Scrabble tile values (English edition).
-export const SCRABBLE_VALUES: Record<string, number> = {
-  A: 1,
-  B: 3,
-  C: 3,
-  D: 2,
-  E: 1,
-  F: 4,
-  G: 2,
-  H: 4,
-  I: 1,
-  J: 8,
-  K: 5,
-  L: 1,
-  M: 3,
-  N: 1,
-  O: 1,
-  P: 3,
-  Q: 10,
-  R: 1,
-  S: 1,
-  T: 1,
-  U: 1,
-  V: 4,
-  W: 4,
-  X: 8,
-  Y: 4,
-  Z: 10,
-};
-
-export function letterValue(letter: string): number {
-  if (!letter)
-    return 0;
-  if (letter.toUpperCase() === "QU")
-    return SCRABBLE_VALUES.Q!;
-  return SCRABBLE_VALUES[letter.toUpperCase()] ?? 0;
-}
-
 class TrieNode {
   children: Map<string, TrieNode> = new Map();
   isWord = false;
@@ -104,7 +66,7 @@ function inBounds(r: number, c: number) {
 
 /**
  * Find every valid word on the board, return them sorted by score desc then length desc.
- * Word score = sum of Scrabble letter values along the path.
+ * Word score = number of spelled letters along the path.
  * Tiles: 4x4 array of { letter }.
  * trie: pre-built dictionary trie.
  */
@@ -127,7 +89,7 @@ function findWordPaths(tiles: Tile[][], trie: Trie): ScoredWord[] {
     }
 
     const newPath = [...path, { row: r, col: c }];
-    const newScore = score + letterValue(tile.letter);
+    const newScore = score + (letter === "q" ? 2 : 1);
 
     if (next.isWord) {
       const word = newPath.map((p) => {
@@ -168,7 +130,7 @@ export function solveBoard(tiles: Tile[][], trie: Trie): ScoredWord[] {
   return Array.from(found.values());
 }
 
-/** Maximize total score over all paths, including alternate paths for the same word. */
+/** Maximize total letters over non-overlapping paths, including alternate paths for the same word. */
 export function selectWordSet(tiles: Tile[][], trie: Trie): ScoredWord[] {
   const byMask = new Map<number, ScoredWord>();
   for (const word of findWordPaths(tiles, trie)) {
@@ -184,8 +146,24 @@ export function selectWordSet(tiles: Tile[][], trie: Trie): ScoredWord[] {
         byCell[i]!.push(candidate);
     }
   }
-  const memo = new Map<number, { score: number; words: ScoredWord[] }>();
-  function choose(available: number): { score: number; words: ScoredWord[] } {
+  if (!candidates.length)
+    return [];
+  const longestLength = Math.max(...candidates.map(candidate => candidate.word.word.length));
+  type Selection = { score: number; words: ScoredWord[] };
+  const memo = new Map<number, Selection>();
+  function isBetter(candidate: Selection, current: Selection): boolean {
+    if (candidate.score !== current.score)
+      return candidate.score > current.score;
+    const candidateLengths = candidate.words.map(word => word.word.length).sort((a, b) => b - a);
+    const currentLengths = current.words.map(word => word.word.length).sort((a, b) => b - a);
+    for (let i = 0; i < Math.max(candidateLengths.length, currentLengths.length); i++) {
+      const difference = (candidateLengths[i] ?? 0) - (currentLengths[i] ?? 0);
+      if (difference)
+        return difference > 0;
+    }
+    return false;
+  }
+  function choose(available: number): Selection {
     if (!available)
       return { score: 0, words: [] };
     const cached = memo.get(available);
@@ -198,18 +176,23 @@ export function selectWordSet(tiles: Tile[][], trie: Trie): ScoredWord[] {
       if ((candidate.mask & available) !== candidate.mask)
         continue;
       const rest = choose(available ^ candidate.mask);
-      const score = candidate.word.score + rest.score;
-      if (score > best.score)
-        best = { score, words: [candidate.word, ...rest.words] };
+      const selection = { score: candidate.word.score + rest.score, words: [candidate.word, ...rest.words] };
+      if (isBetter(selection, best))
+        best = selection;
     }
     memo.set(available, best);
     return best;
   }
-  return [...choose(0xFFFF).words].sort((a, b) => {
-    const aRow = a.path.reduce((sum, step) => sum + step.row, 0) / a.path.length;
-    const bRow = b.path.reduce((sum, step) => sum + step.row, 0) / b.path.length;
-    return aRow - bRow || b.score - a.score || a.word.localeCompare(b.word);
-  });
+  let best: Selection = { score: -1, words: [] };
+  for (const candidate of candidates) {
+    if (candidate.word.word.length !== longestLength)
+      continue;
+    const rest = choose(0xFFFF ^ candidate.mask);
+    const selection = { score: candidate.word.score + rest.score, words: [candidate.word, ...rest.words] };
+    if (isBetter(selection, best))
+      best = selection;
+  }
+  return best.words.sort((a, b) => b.word.length - a.word.length || a.word.localeCompare(b.word));
 }
 
 /**
