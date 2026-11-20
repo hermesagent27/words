@@ -34,7 +34,6 @@ const colors = [
 const defaultColors = ["#000000", "#000000"];
 let scanTimer: ReturnType<typeof setInterval> | null = null;
 let refreshTimer: ReturnType<typeof setTimeout> | null = null;
-let speechResetTimer: ReturnType<typeof setInterval> | null = null;
 let revision = 0;
 let working = false;
 let pending: { frame: HTMLCanvasElement; revision: number } | null = null;
@@ -75,14 +74,10 @@ function toggleSpeech() {
   speechEnabled.value = !speechEnabled.value;
   speechError.value = null;
   if (!speechEnabled.value) {
-    if (speechResetTimer !== null)
-      clearInterval(speechResetTimer);
-    speechResetTimer = null;
     speech.stop();
     lastSpokenSignature = "";
     return;
   }
-  speechResetTimer = setInterval(() => speech?.reset(), 120_000);
   if (frozen.value) {
     speech.speak(selectedWords.value);
     lastSpokenSignature = lastSignature.value;
@@ -283,8 +278,6 @@ onMounted(async () => {
 });
 
 onUnmounted(() => {
-  if (speechResetTimer !== null)
-    clearInterval(speechResetTimer);
   speech?.stop();
   document.removeEventListener("visibilitychange", visibilityChanged);
   stopScanning();
