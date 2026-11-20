@@ -14,8 +14,10 @@ Previously confirmed letters survive a different single read or two unreadable
 reads; three consecutive unreadable reads clear the cell. Partial boards can
 show preliminary words. Once at least 13 letters are confirmed and there are
 suggestions, the app freezes that snapshot and its word paths while continuing
-to monitor the camera. It refreshes after at least one confirmed tile changes
-on each suggested path, even if a previously suggested word can be made again.
+to monitor the camera. With one or two suggested words, it refreshes after at
+least one confirmed tile changes on each suggested path. With more than two,
+it refreshes as soon as one suggested path changes. This happens even if a
+previously suggested word can be made again.
 If the board is temporarily hidden, the frozen snapshot stays visible. Use
 **Reset board memory** to release it or clear a persistent wrong read.
 The processed-snapshot counter shows that monitoring is continuing. The app
@@ -47,7 +49,7 @@ each locked board's suggested words once in their displayed order; enabling it
 on an already locked board reads that board immediately. Otherwise it says
 "Speech enabled" while waiting for a board. Each word is followed by its cell
 numbers in path order: cells are numbered 1–16 left to right, row by row. A QU
-tile has one cell number. Words and numbers are spoken slightly slower, with a
+tile has one cell number. Numbers are spoken in quick succession, with a
 300 ms pause between words. Resetting, muting, or refreshing a locked board
 stops the previous speech; a newly locked board is read automatically. Speech
 is off initially because browsers may require a user gesture, and availability

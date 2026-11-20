@@ -115,7 +115,9 @@ function lockSnapshot(frame: HTMLCanvasElement, board: Tile[][]) {
   context.drawImage(frame, 0, 0);
   frozen.value = { width: frame.width, height: frame.height };
   monitor = createWordChangeMonitor(board, selectedWords.value);
-  statusLine.value = `Board locked — 0/${selectedWords.value.length} suggested words changed`;
+  statusLine.value = selectedWords.value.length > 2
+    ? "Board locked — waiting for one suggested word to change"
+    : `Board locked — 0/${selectedWords.value.length} suggested words changed`;
   if (speechEnabled.value && speech) {
     speechError.value = null;
     speech.speak(selectedWords.value);
@@ -196,7 +198,9 @@ async function processSnapshots() {
       if (monitor) {
         const progress = monitor.update(board, result.tiles);
         if (!progress.complete) {
-          statusLine.value = `Board locked — ${progress.count}/${progress.total} suggested words changed`;
+          statusLine.value = progress.total > 2
+            ? "Board locked — waiting for one suggested word to change"
+            : `Board locked — ${progress.count}/${progress.total} suggested words changed`;
           continue;
         }
         speech?.stop();

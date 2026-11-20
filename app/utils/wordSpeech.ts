@@ -41,7 +41,7 @@ export function createWordSpeech<T extends Utterance>(
         return;
       try {
         const utterance = createUtterance(messages[index]!);
-        utterance.rate = 0.85;
+        utterance.rate = 1.1;
         active = utterance;
         utterance.onerror = (event) => {
           if (revision !== current || active !== utterance)
@@ -74,7 +74,7 @@ export function createWordSpeech<T extends Utterance>(
 
   function speak(words: SpokenWord[]) {
     speakMessages(words.map(({ word, path }) =>
-      `${word}. Cells: ${path.map(({ row, col }) => row * 4 + col + 1).join(", ")}.`));
+      `${word}. ${path.map(({ row, col }) => row * 4 + col + 1).join(" ")}.`));
   }
 
   function enable() {

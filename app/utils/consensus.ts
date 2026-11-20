@@ -74,7 +74,8 @@ export function createWordChangeMonitor(board: Tile[][], words: ScoredWord[]) {
       }
     }
     const count = changed.filter(Boolean).length;
-    return { count, total: paths.length, complete: paths.length > 0 && count === paths.length };
+    const required = paths.length > 2 ? 1 : paths.length;
+    return { count, total: paths.length, complete: required > 0 && count >= required };
   }
 
   return { update };
