@@ -54,8 +54,8 @@ export async function testPhotos() {
     if (actual.join("/") !== expected.join("/"))
       throw new Error(`${photo}: expected ${expected.join("/")}, got ${actual.join("/")}`);
     const best = solveBoard(board, trie)[0];
-    if (best?.word !== "torpor")
-      throw new Error(`${photo}: expected TORPOR, got ${best?.word ?? "no word"}`);
+    if (best?.word !== "operon")
+      throw new Error(`${photo}: expected OPERON, got ${best?.word ?? "no word"}`);
     results.push({ photo, millisecondsPerScan: Math.round((performance.now() - started) / 2) });
   }
 
@@ -73,7 +73,7 @@ export async function testPhotos() {
     throw new Error(`Blank image scan failed: ${ocr.error.value}`);
   context.fillStyle = "#143755";
   context.fillRect(90, 240, 620, 620);
-  const rows = ["QORU", "RUNT", "OORV", "TPEG"];
+  const rows = ["QORU", "RUNT", "OIRV", "TPEG"];
   for (let row = 0; row < 4; row++) {
     for (let col = 0; col < 4; col++) {
       context.fillStyle = "#eeeeeb";
@@ -81,7 +81,7 @@ export async function testPhotos() {
       context.fillStyle = "#111";
       context.textAlign = "center";
       context.textBaseline = "middle";
-      context.font = "bold 70px Arial";
+      context.font = rows[row]![col] === "I" ? "70px Arial" : "bold 70px Arial";
       context.fillText(rows[row]![col]!, 170 + col * 150, 310 + row * 150);
       if (row === 0 && col === 0) {
         context.font = "bold 30px Arial";
@@ -95,6 +95,8 @@ export async function testPhotos() {
   const syntheticResult = await ocr.detectGrid(synthetic);
   if (!syntheticResult || syntheticResult.obstructed || syntheticResult.tiles[0]?.[0]?.letter !== "Q")
     throw new Error(`Synthetic QU tile was not read as Q: ${ocr.error.value ?? "not detected"}`);
+  if (syntheticResult.tiles[2]?.[1]?.letter !== "I")
+    throw new Error("Synthetic narrow I tile was not read as I");
   const clearBoard = context.getImageData(0, 0, synthetic.width, synthetic.height);
   for (const color of ["#c68861", "#784b34", "#1f1f1f"]) {
     context.putImageData(clearBoard, 0, 0);

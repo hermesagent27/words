@@ -1,9 +1,11 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import { test } from "node:test";
 
 import { projectBoardPoint } from "../app/utils/boardGeometry.ts";
 import { isBoardObstructed } from "../app/utils/boardObstruction.ts";
 import { createBoardConsensus, createWordChangeMonitor, currentConfirmedBoard, hasEnoughReadableTiles } from "../app/utils/consensus.ts";
+import { isNarrowI } from "../app/utils/ocrGlyph.ts";
 import { solveBoard, suggestedWords, Trie } from "../app/utils/solver.ts";
 import { createWordSpeech } from "../app/utils/wordSpeech.ts";
 
@@ -18,6 +20,24 @@ function dictionary(...words: string[]) {
     trie.insert(word);
   return trie;
 }
+
+test("expanded dictionary retains existing words and enables additional solutions", () => {
+  const words = readFileSync(new URL("../public/dict/words.txt", import.meta.url), "utf8").trim().split(/\r?\n/);
+  const trie = new Trie();
+  for (const word of words)
+    trie.insert(word);
+  assert.equal(trie.has("begat"), true);
+  assert.equal(trie.has("operon"), true);
+  assert.equal(solveBoard(board(["WORU", "RUNT", "OORV", "TPEG"]), trie)[0]?.word, "operon");
+});
+
+test("narrow I detection rejects short, off-center and irregular marks", () => {
+  const glyph = { width: 4, height: 33, area: 132, centerX: 34 };
+  assert.equal(isNarrowI(glyph, 70), true);
+  assert.equal(isNarrowI({ ...glyph, height: 12, area: 48 }, 70), false);
+  assert.equal(isNarrowI({ ...glyph, centerX: 20 }, 70), false);
+  assert.equal(isNarrowI({ ...glyph, area: 60 }, 70), false);
+});
 
 test("Q consumes one tile but scores the spelled letters QU", () => {
   const tiles = board(["QIT.", "....", "....", "...."]);
@@ -34,7 +54,7 @@ test("QU tile values count both spelled letters when ranking words", () => {
 test("alternate paths leave room for non-overlapping words of the same length", () => {
   const tiles = board(["CAT.", "CA..", "R...", "...."]);
   const result = suggestedWords(tiles, dictionary("cat", "car"));
-  assert.deepEqual(result.map(word => word.word), ["car", "cat"]);
+  assert.deepEqual(result.map(word => word.word), ["cat", "car"]);
   const cells = result.flatMap(word => word.path.map(step => `${step.row},${step.col}`));
   assert.equal(new Set(cells).size, cells.length);
 });

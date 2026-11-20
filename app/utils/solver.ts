@@ -131,60 +131,84 @@ export function solveBoard(tiles: Tile[][], trie: Trie): ScoredWord[] {
 }
 
 function selectNonOverlappingWords(paths: ScoredWord[]): ScoredWord[] {
-  const seen = new Map<string, Set<number>>();
   const candidates: { mask: number; word: ScoredWord }[] = [];
   for (const word of paths) {
     const mask = word.path.reduce((bits, step) => bits | (1 << (step.row * 4 + step.col)), 0);
-    let masks = seen.get(word.word);
-    if (!masks) {
-      masks = new Set<number>();
-      seen.set(word.word, masks);
-    }
-    if (!masks.has(mask)) {
-      masks.add(mask);
-      candidates.push({ mask, word });
-    }
+    candidates.push({ mask, word });
   }
 
-  const memo = new Map<string, ScoredWord[]>();
+  function topDown(a: ScoredWord, b: ScoredWord): number {
+    const aRows = a.path.reduce((sum, step) => sum + step.row, 0);
+    const bRows = b.path.reduce((sum, step) => sum + step.row, 0);
+    return aRows * b.path.length - bRows * a.path.length
+      || b.word.length - a.word.length
+      || a.word.localeCompare(b.word);
+  }
+
+  function playable(words: ScoredWord[]): boolean {
+    let removed = 0;
+    for (const word of [...words].sort(topDown)) {
+      const fallen = word.path.map(({ row, col }) => {
+        let destination = row;
+        for (let below = row + 1; below < 4; below++) {
+          if (removed & (1 << (below * 4 + col)))
+            destination++;
+        }
+        return { row: destination, col };
+      });
+      for (let i = 1; i < fallen.length; i++) {
+        if (Math.abs(fallen[i]!.row - fallen[i - 1]!.row) > 1
+          || Math.abs(fallen[i]!.col - fallen[i - 1]!.col) > 1) {
+          return false;
+        }
+      }
+      for (const { row, col } of word.path)
+        removed |= 1 << (row * 4 + col);
+    }
+    return true;
+  }
+
   function isBetter(candidate: ScoredWord[], current: ScoredWord[]): boolean {
-    for (let i = 0; i < Math.max(candidate.length, current.length); i++) {
-      const difference = (candidate[i]?.word.length ?? 0) - (current[i]?.word.length ?? 0);
+    const candidateByLength = [...candidate].sort((a, b) => b.word.length - a.word.length || a.word.localeCompare(b.word));
+    const currentByLength = [...current].sort((a, b) => b.word.length - a.word.length || a.word.localeCompare(b.word));
+    for (let i = 0; i < Math.max(candidateByLength.length, currentByLength.length); i++) {
+      const difference = (candidateByLength[i]?.word.length ?? 0) - (currentByLength[i]?.word.length ?? 0);
       if (difference)
         return difference > 0;
     }
-    for (let i = 0; i < candidate.length; i++) {
-      const difference = candidate[i]!.word.localeCompare(current[i]!.word);
+    for (let i = 0; i < candidateByLength.length; i++) {
+      const difference = candidateByLength[i]!.word.localeCompare(currentByLength[i]!.word);
       if (difference)
         return difference < 0;
     }
     return false;
   }
-  function choose(available: number, used: Set<string>): ScoredWord[] {
-    const key = `${available}:${Array.from(used).sort().join(",")}`;
-    const cached = memo.get(key);
-    if (cached)
-      return cached;
-    let best: ScoredWord[] = [];
-    for (const candidate of candidates) {
-      if (best.length && candidate.word.word.length < best[0]!.word.length)
+  function choose(start: number, available: number, used: Set<string>, selected: ScoredWord[]): ScoredWord[] {
+    // A word added later in the search may be played earlier and repair an invalid path.
+    let best = playable(selected) ? selected : [];
+    let nextLength = 0;
+    for (let index = start; index < candidates.length; index++) {
+      const candidate = candidates[index]!;
+      if (nextLength && candidate.word.word.length < nextLength)
         break;
       if ((candidate.mask & available) !== candidate.mask || used.has(candidate.word.word))
         continue;
+      const selection = [...selected, candidate.word];
       used.add(candidate.word.word);
-      const rest = choose(available ^ candidate.mask, used);
+      const result = choose(index + 1, available ^ candidate.mask, used, selection);
       used.delete(candidate.word.word);
-      const selection = [candidate.word, ...rest].sort((a, b) => b.word.length - a.word.length || a.word.localeCompare(b.word));
-      if (isBetter(selection, best))
-        best = selection;
+      if (result.length >= selection.length) {
+        nextLength = candidate.word.word.length;
+        if (isBetter(result, best))
+          best = result;
+      }
     }
-    memo.set(key, best);
     return best;
   }
-  return choose(0xFFFF, new Set<string>());
+  return choose(0, 0xFFFF, new Set<string>(), []).sort(topDown);
 }
 
-/** Show non-overlapping words, prioritizing each longest available word. */
+/** Show long, non-overlapping words in a top-down order that survives gravity. */
 export function suggestedWords(tiles: Tile[][], trie: Trie): ScoredWord[] {
   const paths = findWordPaths(tiles, trie);
   if (!paths.length)

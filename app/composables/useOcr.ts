@@ -5,6 +5,7 @@ import type { Tile } from "~/utils/solver";
 
 import { isBoardObstructed } from "~/utils/boardObstruction";
 import { detectBoardCorners } from "~/utils/detectBoard";
+import { isNarrowI } from "~/utils/ocrGlyph";
 
 let cvLoading: Promise<unknown> | null = null;
 let workerLoading: Promise<Worker> | null = null;
@@ -119,7 +120,7 @@ export function useOcr() {
     try {
       cv.threshold(cell, binary, 0, 255, cv.THRESH_BINARY_INV | cv.THRESH_OTSU);
       const count = cv.connectedComponentsWithStats(binary, labels, stats, centroids, 8, cv.CV_32S);
-      let best: { x: number; y: number; width: number; height: number; distance: number } | null = null;
+      let best: { x: number; y: number; width: number; height: number; area: number; centerX: number; distance: number } | null = null;
       for (let i = 1; i < count; i++) {
         const x = stats.intPtr(i, 0)[0] as number;
         const y = stats.intPtr(i, 1)[0] as number;
@@ -129,13 +130,14 @@ export function useOcr() {
         const cx = centroids.doublePtr(i, 0)[0] as number;
         const cy = centroids.doublePtr(i, 1)[0] as number;
         const distance = Math.hypot(cx - inner / 2, cy - inner / 2);
-        if (area < inner * inner * 0.025 || area > inner * inner * 0.7
-          || width < inner * 0.12 || height < inner * 0.15
+        const narrowI = isNarrowI({ width, height, area, centerX: cx }, inner);
+        if ((!narrowI && area < inner * inner * 0.025) || area > inner * inner * 0.7
+          || (!narrowI && width < inner * 0.12) || height < inner * 0.15
           || width > inner * 0.9 || height > inner * 0.9 || distance > inner * 0.35) {
           continue;
         }
         if (!best || distance < best.distance)
-          best = { x, y, width, height, distance };
+          best = { x, y, width, height, area, centerX: cx, distance };
       }
       if (!best)
         return "";
@@ -163,7 +165,7 @@ export function useOcr() {
             scaled.delete();
           }
         }
-        return "";
+        return isNarrowI(best, inner) ? "I" : "";
       }
       finally {
         blob.delete();

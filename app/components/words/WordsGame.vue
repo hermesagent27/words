@@ -400,11 +400,15 @@ onUnmounted(() => {
       <div v-if="selectedWords.length || tiles" class="flex shrink-0 flex-col gap-1 landscape:w-[min(36%,18rem)]">
         <div v-if="selectedWords.length" class="rounded-lg border border-base-300 bg-base-200 px-2 py-1">
           <h2 class="text-sm font-semibold">
-            Word suggestions
+            Play in this order
           </h2>
+          <p class="text-xs text-base-content/70">
+            Paths show the original board; tiles may move after each word.
+          </p>
           <div class="flex flex-wrap gap-x-3 gap-y-1">
             <div v-for="(word, i) in selectedWords" :key="`${word.word}-${i}`" class="flex items-baseline gap-1">
               <span :style="{ color: colorAt(i, 0) }" aria-hidden="true">●</span>
+              <span class="text-xs">{{ i + 1 }}.</span>
               <span class="text-base font-semibold tracking-wide">{{ word.word.toUpperCase() }}</span>
               <span class="text-xs text-base-content/70">{{ word.score }} pts</span>
             </div>

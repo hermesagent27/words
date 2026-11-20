@@ -9,7 +9,8 @@ corrects perspective, and reads all 16 cells. When processing takes longer
 than 500 ms, older pending snapshots are discarded; consensus uses consecutive
 **processed** snapshots.
 
-A letter is confirmed after two matching, sufficiently confident reads.
+A letter is confirmed after two matching reads. Reads require sufficient OCR
+confidence, except for a narrow capital I recognized by its shape.
 Previously confirmed letters survive a different single read or two unreadable
 reads; three consecutive unreadable reads clear the cell. Partial boards can
 show preliminary words. Once at least 13 letters are confirmed and there are
@@ -32,15 +33,23 @@ not recognize every hand or lighting condition.
 The scanner cannot tell that a replacement tile has the same letter as the
 previous tile. The timed refresh still clears the board memory in that case.
 
-The app suggests the longest available word followed by other playable words
-that do not reuse tiles, prioritizing longer words at each step. When words
-have the same length, it favors paths that leave room for longer additional
-words, then breaks ties alphabetically. Each word scores one point per spelled
-letter; a Q tile spells QU and therefore counts as two letters. Suggested paths
-have larger solid-color start markers. Gravity may still move remaining tiles,
-so the frozen paths are only a guide.
+The app prioritizes long, non-overlapping words and lists them from top to
+bottom, based on their average tile row. It simulates gravity after each word
+and only includes follow-up paths whose original letters remain adjacent.
+Replacement tiles are unknown and are not used in the plan. The numbered
+paths mark the original snapshot, so later paths can move as tiles fall; the
+two-second refresh can produce a new plan. Each word scores one point per
+spelled letter; a Q tile spells QU and therefore counts as two letters.
+Suggested paths have larger solid-color start markers.
 The camera or locked snapshot and suggested words fit within the available
 screen.
+
+The dictionary combines the existing SCOWL common-English list (sizes 10–50)
+with lowercase alphabetic words of at least three letters from the
+[SCOWL/ESDB American English large list, release 2026.02.25](https://github.com/en-wl/wordlist-diff/blob/rel-2026.02.25/en_US-large.txt).
+It includes uncommon words, which may change the suggestions. Copyright and
+permission notices are in [SCOWL-Copyright.txt](public/dict/SCOWL-Copyright.txt)
+and [ESDB-Copyright.txt](public/dict/ESDB-Copyright.txt).
 
 Use the speaker button to enable or mute speech. When enabled, the app reads
 each locked board's suggested words once in their displayed order; enabling it
@@ -67,8 +76,9 @@ await (await import("/_nuxt/@fs/C:/absolute/path/to/words/scripts/test-photos.ts
 ```
 
 The photo test checks two repeated still-image reads, the expected 16 letters,
-and TORPOR as the best individual word. It also checks a blank image, a
-synthetic QU tile and simulated obstructions, and reports processing time.
+and OPERON as the best individual word. It also checks a blank image,
+synthetic QU and narrow I tiles and simulated obstructions, and reports
+processing time.
 It does not replace testing with a moving camera, a real finger or real
 falling tiles.
 
