@@ -4,7 +4,7 @@ import { test } from "node:test";
 import { projectBoardPoint } from "../app/utils/boardGeometry.ts";
 import { isBoardObstructed } from "../app/utils/boardObstruction.ts";
 import { createBoardConsensus, createWordChangeMonitor, currentConfirmedBoard, hasEnoughReadableTiles } from "../app/utils/consensus.ts";
-import { bestWord, solveBoard, Trie } from "../app/utils/solver.ts";
+import { solveBoard, suggestedWords, Trie } from "../app/utils/solver.ts";
 import { createWordSpeech } from "../app/utils/wordSpeech.ts";
 
 function board(rows: string[]) {
@@ -25,26 +25,31 @@ test("Q consumes one tile but scores the spelled letters QU", () => {
   assert.deepEqual(result.map(word => [word.word, word.score, word.path.length]), [["quit", 4, 3]]);
 });
 
-test("only one longest word is selected when several tie", () => {
+test("short boards show a non-overlapping set of playable words", () => {
   const tiles = board(["CAT.", "CA..", "R...", "...."]);
-  assert.equal(bestWord(tiles, dictionary("cat", "car"))?.word, "car");
+  const result = suggestedWords(tiles, dictionary("cat", "car"));
+  assert.deepEqual(result.map(word => word.word), ["car", "cat"]);
+  const cells = result.flatMap(word => word.path.map(step => `${step.row},${step.col}`));
+  assert.equal(new Set(cells).size, cells.length);
 });
 
-test("the longest word is selected instead of a tied shorter-word combination", () => {
-  const tiles = board(["TONE", "....", "....", "...."]);
-  const result = bestWord(tiles, dictionary("tone", "to", "ne"));
-  assert.deepEqual(result && [result.word, result.score], ["tone", 4]);
+test("four-letter boards show multiple words instead of one maximum word", () => {
+  const tiles = board(["TONE", "CAT.", "....", "...."]);
+  const result = suggestedWords(tiles, dictionary("tone", "to", "ne", "cat"));
+  assert.deepEqual(result.map(word => [word.word, word.score]), [["tone", 4], ["cat", 3]]);
+  const cells = result.flatMap(word => word.path.map(step => `${step.row},${step.col}`));
+  assert.equal(new Set(cells).size, cells.length);
 });
 
-test("the single best word is returned instead of a combination of other words", () => {
+test("boards with words longer than four letters show only one longest word", () => {
   const tiles = board(["ABCD", "EFGH", "IJKL", "...."]);
-  const result = bestWord(tiles, dictionary("abcdh", "efgji", "abef", "cdg"));
-  assert.deepEqual(result && [result.word, result.score], ["abcdh", 5]);
+  const result = suggestedWords(tiles, dictionary("abcdh", "efgji", "abef", "cdg"));
+  assert.deepEqual(result.map(word => [word.word, word.score]), [["abcdh", 5]]);
 });
 
 test("partial boards only use confirmed letters", () => {
   const tiles = board(["CAT.", "....", "....", "...."]);
-  assert.equal(bestWord(tiles, dictionary("cat"))?.word, "cat");
+  assert.deepEqual(suggestedWords(tiles, dictionary("cat")).map(word => word.word), ["cat"]);
 });
 
 test("consensus requires consecutive matching reads and retains transient misses", () => {

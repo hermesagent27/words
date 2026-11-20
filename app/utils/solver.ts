@@ -130,6 +130,85 @@ export function solveBoard(tiles: Tile[][], trie: Trie): ScoredWord[] {
   return Array.from(found.values());
 }
 
+function selectNonOverlappingWords(paths: ScoredWord[]): ScoredWord[] {
+  const longestLength = paths[0]!.word.length;
+  const pathsByWord = new Map<string, Map<number, ScoredWord>>();
+  for (const word of paths) {
+    const mask = word.path.reduce((bits, step) => bits | (1 << (step.row * 4 + step.col)), 0);
+    let wordPaths = pathsByWord.get(word.word);
+    if (!wordPaths) {
+      wordPaths = new Map<number, ScoredWord>();
+      pathsByWord.set(word.word, wordPaths);
+    }
+    if (!wordPaths.has(mask))
+      wordPaths.set(mask, word);
+  }
+  const groups = Array.from(pathsByWord)
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([word, wordPaths]) => ({
+      word,
+      paths: Array.from(wordPaths, ([mask, candidate]) => ({ mask, word: candidate })),
+    }));
+
+  type Selection = { longestCount: number; count: number; score: number; words: ScoredWord[] };
+  const memo = new Map<number, Map<number, Selection>>();
+  function isBetter(candidate: Selection, current: Selection): boolean {
+    if (candidate.longestCount !== current.longestCount)
+      return candidate.longestCount > current.longestCount;
+    if (candidate.count !== current.count)
+      return candidate.count > current.count;
+    if (candidate.score !== current.score)
+      return candidate.score > current.score;
+    const candidateWords = candidate.words.map(word => word.word).sort();
+    const currentWords = current.words.map(word => word.word).sort();
+    for (let i = 0; i < candidateWords.length; i++) {
+      const difference = candidateWords[i]!.localeCompare(currentWords[i]!);
+      if (difference)
+        return difference < 0;
+    }
+    return false;
+  }
+  function choose(groupIndex: number, available: number): Selection {
+    if (groupIndex === groups.length)
+      return { longestCount: 0, count: 0, score: 0, words: [] };
+    let groupMemo = memo.get(groupIndex);
+    if (!groupMemo) {
+      groupMemo = new Map<number, Selection>();
+      memo.set(groupIndex, groupMemo);
+    }
+    const cached = groupMemo.get(available);
+    if (cached)
+      return cached;
+    let best = choose(groupIndex + 1, available);
+    for (const candidate of groups[groupIndex]!.paths) {
+      if ((candidate.mask & available) !== candidate.mask)
+        continue;
+      const rest = choose(groupIndex + 1, available ^ candidate.mask);
+      const selection = {
+        longestCount: rest.longestCount + (candidate.word.word.length === longestLength ? 1 : 0),
+        count: rest.count + 1,
+        score: rest.score + candidate.word.score,
+        words: [candidate.word, ...rest.words],
+      };
+      if (isBetter(selection, best))
+        best = selection;
+    }
+    groupMemo.set(available, best);
+    return best;
+  }
+  return choose(0, 0xFFFF).words.sort((a, b) => b.score - a.score || a.word.localeCompare(b.word));
+}
+
+/** Show a non-overlapping word set on short boards, otherwise show only the longest word. */
+export function suggestedWords(tiles: Tile[][], trie: Trie): ScoredWord[] {
+  const paths = findWordPaths(tiles, trie);
+  if (!paths.length)
+    return [];
+  return paths[0]!.word.length <= 4
+    ? selectNonOverlappingWords(paths)
+    : [paths[0]!];
+}
+
 /**
  * Convenience: pick the single best word.
  */

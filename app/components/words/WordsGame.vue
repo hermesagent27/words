@@ -4,7 +4,7 @@ import type { ScoredWord, Tile } from "~/utils/solver";
 
 import { projectBoardPoint } from "~/utils/boardGeometry";
 import { createBoardConsensus, createWordChangeMonitor, currentConfirmedBoard, hasEnoughReadableTiles } from "~/utils/consensus";
-import { bestWord } from "~/utils/solver";
+import { suggestedWords } from "~/utils/solver";
 import { createWordSpeech } from "~/utils/wordSpeech";
 
 const { trie, error: dictionaryError, load: loadWords } = useWordList();
@@ -74,8 +74,7 @@ function solveCurrent(board: Tile[][]) {
   if (signature === lastSignature.value)
     return;
   lastSignature.value = signature;
-  const word = bestWord(board, trie.value);
-  selectedWords.value = word ? [word] : [];
+  selectedWords.value = suggestedWords(board, trie.value);
 }
 
 const paths = computed(() => {
@@ -377,7 +376,7 @@ onUnmounted(() => {
       <div v-if="selectedWords.length || tiles" class="flex shrink-0 flex-col gap-1 landscape:w-[min(36%,18rem)]">
         <div v-if="selectedWords.length" class="rounded-lg border border-base-300 bg-base-200 px-2 py-1">
           <h2 class="text-sm font-semibold">
-            Longest word
+            Word suggestions
           </h2>
           <div class="flex flex-wrap gap-x-3 gap-y-1">
             <div v-for="(word, i) in selectedWords" :key="`${word.word}-${i}`" class="flex items-baseline gap-1">
