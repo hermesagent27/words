@@ -82,6 +82,12 @@ processing time.
 It does not replace testing with a moving camera, a real finger or real
 falling tiles.
 
+## Copilot note: capital I on board-i-reading.JPG
+
+Copilot: adjust the OCR until it reliably reads the letter "I" on
+`public/board-i-reading.JPG`. The true letters on this board, left to right,
+row by row, are: ULIE UOTI RGGI UIRH.
+
 ## Repository Structure
 
 - `data/`: Aggregate data that is the main data source for the app.
