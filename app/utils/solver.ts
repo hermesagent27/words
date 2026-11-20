@@ -130,69 +130,68 @@ export function solveBoard(tiles: Tile[][], trie: Trie): ScoredWord[] {
   return Array.from(found.values());
 }
 
-/** Maximize total letters over non-overlapping paths, including alternate paths for the same word. */
+/** Return the largest words that can be played without sharing tiles. */
 export function selectWordSet(tiles: Tile[][], trie: Trie): ScoredWord[] {
-  const byMask = new Map<number, ScoredWord>();
+  const pathsByWord = new Map<string, Map<number, ScoredWord>>();
   for (const word of findWordPaths(tiles, trie)) {
     const mask = word.path.reduce((bits, step) => bits | (1 << (step.row * 4 + step.col)), 0);
-    if (!byMask.has(mask))
-      byMask.set(mask, word);
-  }
-  const candidates = Array.from(byMask, ([mask, word]) => ({ mask, word }));
-  const byCell = Array.from({ length: 16 }, () => [] as typeof candidates);
-  for (const candidate of candidates) {
-    for (let i = 0; i < 16; i++) {
-      if (candidate.mask & (1 << i))
-        byCell[i]!.push(candidate);
+    let paths = pathsByWord.get(word.word);
+    if (!paths) {
+      paths = new Map<number, ScoredWord>();
+      pathsByWord.set(word.word, paths);
     }
+    if (!paths.has(mask))
+      paths.set(mask, word);
   }
-  if (!candidates.length)
+  if (!pathsByWord.size)
     return [];
-  const longestLength = Math.max(...candidates.map(candidate => candidate.word.word.length));
-  type Selection = { score: number; words: ScoredWord[] };
-  const memo = new Map<number, Selection>();
+  const longestLength = Math.max(...Array.from(pathsByWord.keys(), word => word.length));
+  const groups = Array.from(pathsByWord)
+    .filter(([word]) => word.length === longestLength)
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([word, paths]) => ({
+      word,
+      candidates: Array.from(paths, ([mask, candidate]) => ({ mask, word: candidate })),
+    }));
+
+  type Selection = { count: number; words: ScoredWord[] };
+  const memo = new Map<number, Map<number, Selection>>();
   function isBetter(candidate: Selection, current: Selection): boolean {
-    if (candidate.score !== current.score)
-      return candidate.score > current.score;
-    const candidateLengths = candidate.words.map(word => word.word.length).sort((a, b) => b - a);
-    const currentLengths = current.words.map(word => word.word.length).sort((a, b) => b - a);
-    for (let i = 0; i < Math.max(candidateLengths.length, currentLengths.length); i++) {
-      const difference = (candidateLengths[i] ?? 0) - (currentLengths[i] ?? 0);
+    if (candidate.count !== current.count)
+      return candidate.count > current.count;
+    const candidateWords = candidate.words.map(word => word.word).sort();
+    const currentWords = current.words.map(word => word.word).sort();
+    for (let i = 0; i < candidateWords.length; i++) {
+      const difference = candidateWords[i]!.localeCompare(currentWords[i]!);
       if (difference)
-        return difference > 0;
+        return difference < 0;
     }
     return false;
   }
-  function choose(available: number): Selection {
-    if (!available)
-      return { score: 0, words: [] };
-    const cached = memo.get(available);
+  function choose(groupIndex: number, available: number): Selection {
+    if (groupIndex === groups.length)
+      return { count: 0, words: [] };
+    let groupMemo = memo.get(groupIndex);
+    if (!groupMemo) {
+      groupMemo = new Map<number, Selection>();
+      memo.set(groupIndex, groupMemo);
+    }
+    const cached = groupMemo.get(available);
     if (cached)
       return cached;
-    const bit = available & -available;
-    const cell = Math.log2(bit);
-    let best = choose(available ^ bit);
-    for (const candidate of byCell[cell]!) {
+    let best = choose(groupIndex + 1, available);
+    for (const candidate of groups[groupIndex]!.candidates) {
       if ((candidate.mask & available) !== candidate.mask)
         continue;
-      const rest = choose(available ^ candidate.mask);
-      const selection = { score: candidate.word.score + rest.score, words: [candidate.word, ...rest.words] };
+      const rest = choose(groupIndex + 1, available ^ candidate.mask);
+      const selection = { count: rest.count + 1, words: [candidate.word, ...rest.words] };
       if (isBetter(selection, best))
         best = selection;
     }
-    memo.set(available, best);
+    groupMemo.set(available, best);
     return best;
   }
-  let best: Selection = { score: -1, words: [] };
-  for (const candidate of candidates) {
-    if (candidate.word.word.length !== longestLength)
-      continue;
-    const rest = choose(0xFFFF ^ candidate.mask);
-    const selection = { score: candidate.word.score + rest.score, words: [candidate.word, ...rest.words] };
-    if (isBetter(selection, best))
-      best = selection;
-  }
-  return best.words.sort((a, b) => b.word.length - a.word.length || a.word.localeCompare(b.word));
+  return choose(0, 0xFFFF).words.sort((a, b) => a.word.localeCompare(b.word));
 }
 
 /**
