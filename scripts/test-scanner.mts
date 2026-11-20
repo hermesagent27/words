@@ -41,10 +41,18 @@ test("four-letter boards show multiple words instead of one maximum word", () =>
   assert.equal(new Set(cells).size, cells.length);
 });
 
-test("boards with words longer than four letters show only one longest word", () => {
+test("five-letter boards show non-overlapping words", () => {
   const tiles = board(["ABCD", "EFGH", "IJKL", "...."]);
   const result = suggestedWords(tiles, dictionary("abcdh", "efgji", "abef", "cdg"));
-  assert.deepEqual(result.map(word => [word.word, word.score]), [["abcdh", 5]]);
+  assert.deepEqual(result.map(word => [word.word, word.score]), [["abcdh", 5], ["efgji", 5]]);
+  const cells = result.flatMap(word => word.path.map(step => `${step.row},${step.col}`));
+  assert.equal(new Set(cells).size, cells.length);
+});
+
+test("boards with words longer than five letters show only one longest word", () => {
+  const tiles = board(["ABCD", "EFGH", "IJKL", "...."]);
+  const result = suggestedWords(tiles, dictionary("abcdhl", "efgji"));
+  assert.deepEqual(result.map(word => [word.word, word.score]), [["abcdhl", 6]]);
 });
 
 test("partial boards only use confirmed letters", () => {

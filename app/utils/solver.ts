@@ -2,6 +2,8 @@
 // Core Boggle-style solver: trie + DFS over 4x4 grid.
 // Pure TypeScript, no Vue deps, so it can run in a Web Worker or be unit-tested.
 
+import { MAX_LENGTH_FOR_MULTIPLE_WORDS } from "../lib/constants.mjs";
+
 export type Tile = {
   letter: string;
   row: number;
@@ -204,7 +206,7 @@ export function suggestedWords(tiles: Tile[][], trie: Trie): ScoredWord[] {
   const paths = findWordPaths(tiles, trie);
   if (!paths.length)
     return [];
-  return paths[0]!.word.length <= 4
+  return paths[0]!.word.length <= MAX_LENGTH_FOR_MULTIPLE_WORDS
     ? selectNonOverlappingWords(paths)
     : [paths[0]!];
 }
