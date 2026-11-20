@@ -29,13 +29,11 @@ The scanner cannot tell that a replacement tile has the same letter as the
 previous tile. If that prevents a suggested path from registering a change,
 use **Reset board memory**.
 
-The suggested set contains the largest available words that can be played
-without sharing tiles. Shorter words are not included. Each word scores one
-point per spelled letter; a Q tile spells QU and therefore counts as two
-letters. Words of equal length are listed alphabetically. Each path has a larger
-solid-color start marker: the first four fade from red to orange, yellow to
-lime, green to teal, and light blue to purple; later paths are black. Gravity
-may still move remaining paths, so the frozen paths are only a guide.
+The app suggests only the single longest available word. If several words tie
+for length, it chooses the alphabetically first one. Each word scores one point
+per spelled letter; a Q tile spells QU and therefore counts as two letters. The
+path has a larger solid-color start marker. Gravity may still move remaining
+tiles, so the frozen path is only a guide.
 The camera or locked snapshot and suggested words fit within the available
 screen.
 

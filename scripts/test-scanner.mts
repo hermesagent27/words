@@ -4,7 +4,7 @@ import { test } from "node:test";
 import { projectBoardPoint } from "../app/utils/boardGeometry.ts";
 import { isBoardObstructed } from "../app/utils/boardObstruction.ts";
 import { createBoardConsensus, createWordChangeMonitor, currentConfirmedBoard, hasEnoughReadableTiles } from "../app/utils/consensus.ts";
-import { selectWordSet, solveBoard, Trie } from "../app/utils/solver.ts";
+import { bestWord, solveBoard, Trie } from "../app/utils/solver.ts";
 import { createWordSpeech } from "../app/utils/wordSpeech.ts";
 
 function board(rows: string[]) {
@@ -25,32 +25,26 @@ test("Q consumes one tile but scores the spelled letters QU", () => {
   assert.deepEqual(result.map(word => [word.word, word.score, word.path.length]), [["quit", 4, 3]]);
 });
 
-test("all longest words with non-overlapping paths are selected", () => {
+test("only one longest word is selected when several tie", () => {
   const tiles = board(["CAT.", "CA..", "R...", "...."]);
-  const result = selectWordSet(tiles, dictionary("cat", "car"));
-  assert.equal(result.reduce((sum, word) => sum + word.score, 0), 6);
-  assert.deepEqual(result.map(word => word.word), ["car", "cat"]);
-  const cells = result.flatMap(word => word.path.map(step => `${step.row},${step.col}`));
-  assert.equal(new Set(cells).size, cells.length);
+  assert.equal(bestWord(tiles, dictionary("cat", "car"))?.word, "car");
 });
 
-test("equal letter totals prefer the longer word over several short words", () => {
+test("the longest word is selected instead of a tied shorter-word combination", () => {
   const tiles = board(["TONE", "....", "....", "...."]);
-  const result = selectWordSet(tiles, dictionary("tone", "to", "ne"));
-  assert.deepEqual(result.map(word => [word.word, word.score]), [["tone", 4]]);
+  const result = bestWord(tiles, dictionary("tone", "to", "ne"));
+  assert.deepEqual(result && [result.word, result.score], ["tone", 4]);
 });
 
-test("only maximum-length words are returned, with a non-overlapping set", () => {
+test("the single best word is returned instead of a combination of other words", () => {
   const tiles = board(["ABCD", "EFGH", "IJKL", "...."]);
-  const result = selectWordSet(tiles, dictionary("abcdh", "efgji", "abef", "cdg"));
-  assert.deepEqual(result.map(word => [word.word, word.score]), [["abcdh", 5], ["efgji", 5]]);
-  const cells = result.flatMap(word => word.path.map(step => `${step.row},${step.col}`));
-  assert.equal(new Set(cells).size, cells.length);
+  const result = bestWord(tiles, dictionary("abcdh", "efgji", "abef", "cdg"));
+  assert.deepEqual(result && [result.word, result.score], ["abcdh", 5]);
 });
 
 test("partial boards only use confirmed letters", () => {
   const tiles = board(["CAT.", "....", "....", "...."]);
-  assert.deepEqual(selectWordSet(tiles, dictionary("cat")).map(word => word.word), ["cat"]);
+  assert.equal(bestWord(tiles, dictionary("cat"))?.word, "cat");
 });
 
 test("consensus requires consecutive matching reads and retains transient misses", () => {
