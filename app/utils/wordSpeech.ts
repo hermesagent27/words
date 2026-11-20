@@ -1,4 +1,7 @@
+import type { ScoredWord } from "./solver";
+
 type Utterance = Pick<SpeechSynthesisUtterance, "onend" | "onerror" | "rate">;
+type SpokenWord = Pick<ScoredWord, "word" | "path">;
 
 export function createWordSpeech<T extends Utterance>(
   synthesis: { speak: (utterance: T) => void; cancel: () => void },
@@ -11,11 +14,14 @@ export function createWordSpeech<T extends Utterance>(
 
   function stop(): boolean {
     revision++;
+    const wasActive = active !== null;
     active = null;
     if (pause !== null) {
       clearTimeout(pause);
       pause = null;
     }
+    if (!wasActive)
+      return true;
     try {
       synthesis.cancel();
       return true;
@@ -26,15 +32,15 @@ export function createWordSpeech<T extends Utterance>(
     }
   }
 
-  function speak(words: string[]) {
-    if (!stop() || !words.length)
+  function speakMessages(messages: string[]) {
+    if (!stop() || !messages.length)
       return;
     const current = revision;
     function speakWord(index: number) {
       if (revision !== current)
         return;
       try {
-        const utterance = createUtterance(words[index]!);
+        const utterance = createUtterance(messages[index]!);
         utterance.rate = 0.85;
         active = utterance;
         utterance.onerror = (event) => {
@@ -48,7 +54,7 @@ export function createWordSpeech<T extends Utterance>(
           if (revision !== current || active !== utterance)
             return;
           active = null;
-          if (index + 1 < words.length) {
+          if (index + 1 < messages.length) {
             pause = setTimeout(() => {
               pause = null;
               speakWord(index + 1);
@@ -66,5 +72,14 @@ export function createWordSpeech<T extends Utterance>(
     speakWord(0);
   }
 
-  return { speak, stop };
+  function speak(words: SpokenWord[]) {
+    speakMessages(words.map(({ word, path }) =>
+      `${word}. Cells: ${path.map(({ row, col }) => row * 4 + col + 1).join(", ")}.`));
+  }
+
+  function enable() {
+    speakMessages(["Speech enabled."]);
+  }
+
+  return { enable, speak, stop };
 }

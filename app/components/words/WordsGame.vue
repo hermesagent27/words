@@ -63,7 +63,9 @@ function toggleSpeech() {
     return;
   }
   if (frozen.value)
-    speech.speak(selectedWords.value.map(word => word.word));
+    speech.speak(selectedWords.value);
+  else
+    speech.enable();
 }
 
 function solveCurrent(board: Tile[][]) {
@@ -116,7 +118,7 @@ function lockSnapshot(frame: HTMLCanvasElement, board: Tile[][]) {
   statusLine.value = `Board locked — 0/${selectedWords.value.length} suggested words changed`;
   if (speechEnabled.value && speech) {
     speechError.value = null;
-    speech.speak(selectedWords.value.map(word => word.word));
+    speech.speak(selectedWords.value);
   }
 }
 

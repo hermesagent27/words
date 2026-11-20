@@ -172,21 +172,57 @@ test("speech reads slowly in order with a 300ms pause and cancels pending words"
     (text: string): Request => ({ text, rate: 1, onend: null, onerror: null }),
     message => assert.fail(message),
   );
-  speech.speak(["now", "rut", "our"]);
+  speech.speak([
+    { word: "now", path: [{ row: 0, col: 0 }, { row: 0, col: 3 }, { row: 3, col: 3 }] },
+    { word: "rut", path: [{ row: 2, col: 0 }, { row: 1, col: 2 }, { row: 1, col: 3 }] },
+    { word: "our", path: [{ row: 1, col: 0 }] },
+  ]);
   assert.equal(requests[0]!.rate, 0.85);
   requests[0]!.onend!.call({} as SpeechSynthesisUtterance, {} as SpeechSynthesisEvent);
   t.mock.timers.tick(299);
-  assert.deepEqual(actions, ["cancel", "now"]);
+  assert.deepEqual(actions, ["now. Cells: 1, 4, 16."]);
   t.mock.timers.tick(1);
-  assert.deepEqual(actions, ["cancel", "now", "rut"]);
+  assert.deepEqual(actions, ["now. Cells: 1, 4, 16.", "rut. Cells: 9, 7, 8."]);
   requests[1]!.onend!.call({} as SpeechSynthesisUtterance, {} as SpeechSynthesisEvent);
-  speech.speak(["new", "words"]);
+  speech.speak([
+    { word: "new", path: [{ row: 0, col: 1 }] },
+    { word: "words", path: [{ row: 1, col: 0 }] },
+  ]);
   t.mock.timers.tick(300);
-  assert.deepEqual(actions, ["cancel", "now", "rut", "cancel", "new"]);
+  assert.deepEqual(actions, ["now. Cells: 1, 4, 16.", "rut. Cells: 9, 7, 8.", "new. Cells: 2."]);
   requests[2]!.onend!.call({} as SpeechSynthesisUtterance, {} as SpeechSynthesisEvent);
   speech.stop();
   t.mock.timers.tick(300);
-  assert.deepEqual(actions, ["cancel", "now", "rut", "cancel", "new", "cancel"]);
+  assert.deepEqual(actions, ["now. Cells: 1, 4, 16.", "rut. Cells: 9, 7, 8.", "new. Cells: 2."]);
+});
+
+test("speech enabled before a board is ready resumes on refreshed boards", () => {
+  type Request = { text: string; rate: number; onend: SpeechSynthesisUtterance["onend"]; onerror: SpeechSynthesisUtterance["onerror"] };
+  const requests: Request[] = [];
+  let cancellations = 0;
+  const speech = createWordSpeech(
+    {
+      cancel: () => { cancellations++; },
+      speak: (request: Request) => { requests.push(request); },
+    },
+    (text: string): Request => ({ text, rate: 1, onend: null, onerror: null }),
+    message => assert.fail(message),
+  );
+  speech.enable();
+  assert.equal(requests[0]!.text, "Speech enabled.");
+  requests[0]!.onend!.call({} as SpeechSynthesisUtterance, {} as SpeechSynthesisEvent);
+  speech.speak([{ word: "quit", path: [{ row: 0, col: 0 }, { row: 1, col: 1 }, { row: 2, col: 2 }] }]);
+  assert.equal(requests[1]!.text, "quit. Cells: 1, 6, 11.");
+  speech.stop();
+  assert.equal(cancellations, 1);
+  speech.speak([{ word: "new", path: [{ row: 3, col: 3 }] }]);
+  requests[1]!.onerror!.call({} as SpeechSynthesisUtterance, { error: "interrupted" } as SpeechSynthesisErrorEvent);
+  assert.equal(requests[2]!.text, "new. Cells: 16.");
+  requests[2]!.onend!.call({} as SpeechSynthesisUtterance, {} as SpeechSynthesisEvent);
+  speech.stop();
+  speech.speak([{ word: "next", path: [{ row: 0, col: 1 }] }]);
+  assert.equal(cancellations, 1);
+  assert.equal(requests[3]!.text, "next. Cells: 2.");
 });
 
 test("speech reports failures instead of silently appearing to work", () => {
@@ -200,6 +236,6 @@ test("speech reports failures instead of silently appearing to work", () => {
     (text: string): Request => ({ text, rate: 1, onend: null, onerror: null }),
     message => errors.push(message),
   );
-  speech.speak(["cat"]);
+  speech.speak([{ word: "cat", path: [{ row: 0, col: 0 }] }]);
   assert.deepEqual(errors, ["Unable to start speech: blocked"]);
 });

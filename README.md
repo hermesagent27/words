@@ -44,11 +44,14 @@ screen.
 
 Use the speaker button to enable or mute speech. When enabled, the app reads
 each locked board's suggested words once in their displayed order; enabling it
-on an already locked board reads that board immediately. Words are spoken
-slightly slower, with a 300 ms pause between them. Resetting, muting, or
-refreshing a locked board stops the previous speech. Speech is off initially
-because browsers may require a user gesture, and availability depends on the
-browser and installed voices.
+on an already locked board reads that board immediately. Otherwise it says
+"Speech enabled" while waiting for a board. Each word is followed by its cell
+numbers in path order: cells are numbered 1–16 left to right, row by row. A QU
+tile has one cell number. Words and numbers are spoken slightly slower, with a
+300 ms pause between words. Resetting, muting, or refreshing a locked board
+stops the previous speech; a newly locked board is read automatically. Speech
+is off initially because browsers may require a user gesture, and availability
+depends on the browser and installed voices.
 
 Run scanner and gravity checks with:
 
