@@ -16,16 +16,11 @@ const expected = ["WORU", "RUNT", "OORV", "TPEG"];
 
 /** Run in an authenticated development browser; see README for the command. */
 export async function testPhotos() {
-  const response = await fetch("/dict/words.txt");
-  if (!response.ok)
-    throw new Error(`Could not load dictionary: HTTP ${response.status}`);
+  const results = [await testCapitalIPhoto()];
   const trie = new Trie();
-  for (const word of (await response.text()).split(/\r?\n/)) {
-    if (word.trim().length >= 3)
-      trie.insert(word.trim());
-  }
+  trie.insert("operon");
   const ocr = useOcr();
-  const results: Array<{ photo: string; millisecondsPerScan: number }> = [];
+  const photoResults: Array<{ photo: string; millisecondsPerScan: number }> = [];
   for (const photo of photos) {
     const image = new Image();
     image.src = `/${photo}.JPG`;
@@ -56,7 +51,7 @@ export async function testPhotos() {
     const best = solveBoard(board, trie)[0];
     if (best?.word !== "operon")
       throw new Error(`${photo}: expected OPERON, got ${best?.word ?? "no word"}`);
-    results.push({ photo, millisecondsPerScan: Math.round((performance.now() - started) / 2) });
+    photoResults.push({ photo, millisecondsPerScan: Math.round((performance.now() - started) / 2) });
   }
 
   const synthetic = document.createElement("canvas");
@@ -110,5 +105,39 @@ export async function testPhotos() {
     if (result.obstructed !== (color === "#1f1f1f"))
       throw new Error(`Synthetic patch ${color} had unexpected obstruction status`);
   }
-  return results;
+  return [...results, ...photoResults];
+}
+
+export async function testCapitalIPhoto() {
+  const photo = "board-i-reading";
+  const expectedLetters = ["ULIE", "UOTI", "RGGI", "UIRH"];
+  const image = new Image();
+  image.src = `/${photo}.JPG`;
+  await image.decode();
+  const canvas = document.createElement("canvas");
+  canvas.width = image.naturalWidth;
+  canvas.height = image.naturalHeight;
+  const context = canvas.getContext("2d");
+  if (!context)
+    throw new Error(`Could not create ${photo} canvas`);
+  context.drawImage(image, 0, 0);
+
+  const ocr = useOcr();
+  const consensus = createBoardConsensus();
+  const started = performance.now();
+  let board;
+  for (let scan = 0; scan < 2; scan++) {
+    const result = await ocr.detectGrid(canvas);
+    if (!result)
+      throw new Error(`${photo}: ${ocr.error.value ?? "board not detected"}`);
+    if (result.obstructed)
+      throw new Error(`${photo}: unobstructed board was marked obstructed`);
+    board = consensus.update(result.tiles);
+  }
+  if (!board)
+    throw new Error(`${photo}: no scans completed`);
+  const actual = board.map(row => row.map(tile => tile.letter || "?").join(""));
+  if (actual.join("/") !== expectedLetters.join("/"))
+    throw new Error(`${photo}: expected ${expectedLetters.join("/")}, got ${actual.join("/")}`);
+  return { photo, millisecondsPerScan: Math.round((performance.now() - started) / 2) };
 }

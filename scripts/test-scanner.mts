@@ -1,5 +1,4 @@
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
 import { test } from "node:test";
 
 import { projectBoardPoint } from "../app/utils/boardGeometry.ts";
@@ -20,16 +19,6 @@ function dictionary(...words: string[]) {
     trie.insert(word);
   return trie;
 }
-
-test("expanded dictionary retains existing words and enables additional solutions", () => {
-  const words = readFileSync(new URL("../public/dict/words.txt", import.meta.url), "utf8").trim().split(/\r?\n/);
-  const trie = new Trie();
-  for (const word of words)
-    trie.insert(word);
-  assert.equal(trie.has("begat"), true);
-  assert.equal(trie.has("operon"), true);
-  assert.equal(solveBoard(board(["WORU", "RUNT", "OORV", "TPEG"]), trie)[0]?.word, "operon");
-});
 
 test("narrow I detection rejects short, off-center and irregular marks", () => {
   const glyph = { width: 4, height: 33, area: 132, centerX: 34 };

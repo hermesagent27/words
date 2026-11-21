@@ -76,9 +76,11 @@ await (await import("/_nuxt/@fs/C:/absolute/path/to/words/scripts/test-photos.ts
 ```
 
 The photo test checks two repeated still-image reads, the expected 16 letters,
-and OPERON as the best individual word. It also checks a blank image,
-synthetic QU and narrow I tiles and simulated obstructions, and reports
-processing time.
+and OPERON as the best individual word. It also checks
+`board-i-reading.JPG` twice against `ULIE UOTI RGGI UIRH`, a blank image,
+synthetic QU and narrow I tiles, and simulated obstructions, and reports
+processing time. To run just the capital-I photo check, use
+`.testCapitalIPhoto()` instead of `.testPhotos()` in the command above.
 It does not replace testing with a moving camera, a real finger or real
 falling tiles.
 
