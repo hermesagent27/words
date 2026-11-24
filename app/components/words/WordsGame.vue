@@ -4,6 +4,7 @@ import type { ScoredWord, Tile } from "~/utils/solver";
 
 import { projectBoardPoint } from "~/utils/boardGeometry";
 import { createBoardConsensus, createWordChangeMonitor, currentConfirmedBoard, hasEnoughReadableTiles } from "~/utils/consensus";
+import { pathLineStyle } from "~/utils/pathAnimation";
 import { predictedBoards, predictPathPosition, suggestedWords } from "~/utils/solver";
 import { createWordSpeech } from "~/utils/wordSpeech";
 
@@ -153,17 +154,6 @@ const predictedTiles = computed(() => {
 
 function colorAt(index: number): string {
   return colors[index] ?? fallbackColor;
-}
-
-function pathLineStyle(wordIndex: number, segmentIndex: number, from: Point, to: Point) {
-  const length = Math.hypot(to.x - from.x, to.y - from.y);
-  const visible = wordIndex <= revealedWordIndex.value;
-  const animating = wordIndex === revealedWordIndex.value;
-  return {
-    strokeDasharray: `${length} ${length}`,
-    strokeDashoffset: visible ? 0 : length,
-    transition: animating ? `stroke-dashoffset 200ms linear ${segmentIndex * 200}ms` : "none",
-  };
 }
 
 function lockSnapshot(frame: HTMLCanvasElement, board: Tile[][]) {
@@ -442,7 +432,7 @@ onUnmounted(() => {
                   :x2="point.x"
                   :y2="point.y"
                   :stroke="colorAt(index)"
-                  :style="pathLineStyle(index, i, path[i]!, point)"
+                  :style="pathLineStyle(selectedWords[index]!.word, path.length - 1, index, i, revealedWordIndex, path[i]!, point)"
                   stroke-width="12"
                   stroke-linecap="round"
                 />

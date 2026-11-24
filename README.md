@@ -57,9 +57,10 @@ each locked board's suggested words once in their displayed order; enabling it
 on an already locked board reads that board immediately. Otherwise it says
 "Speech enabled" while waiting for a board. Only words are spoken, with a
 300 ms pause between them and a speech rate of 0.9. Path lines stay hidden until
-speech starts; each word's path is drawn one segment at a time, 200 ms per
-segment, as the word is spoken. Muting or detecting a changed suggested path
-stops the previous speech. A newly locked board is read automatically, but
+speech starts; each word's path is drawn one segment at a time, taking 200 ms
+in total for 2–4 letters, 300 ms for 5–7, and 500 ms for 8 or more. Muting or
+detecting a changed suggested path stops the previous speech. A newly locked
+board is read automatically, but
 timed refreshes of the same board do not repeat or interrupt its speech. Speech
 is off initially because browsers may require a user gesture, and availability
 depends on the browser and installed voices.

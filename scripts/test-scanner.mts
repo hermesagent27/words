@@ -5,6 +5,7 @@ import { projectBoardPoint } from "../app/utils/boardGeometry.ts";
 import { isBoardObstructed } from "../app/utils/boardObstruction.ts";
 import { createBoardConsensus, createWordChangeMonitor, currentConfirmedBoard, hasEnoughReadableTiles } from "../app/utils/consensus.ts";
 import { isNarrowI } from "../app/utils/ocrGlyph.ts";
+import { pathLineStyle } from "../app/utils/pathAnimation.ts";
 import { solveBoard, suggestedWords, Trie } from "../app/utils/solver.ts";
 import { createWordSpeech } from "../app/utils/wordSpeech.ts";
 
@@ -185,6 +186,22 @@ test("overlay projection follows perspective rather than bilinear interpolation"
   const center = projectBoardPoint(corners, 0.5, 0.5);
   assert.ok(Math.abs(center.x - 50) < 1e-8);
   assert.ok(Math.abs(center.y - 62.5) < 1e-8);
+});
+
+test("path segments share the whole-word duration based on spelled length", () => {
+  const from = { x: 0, y: 0 };
+  const to = { x: 3, y: 4 };
+  for (const [word, segmentCount, totalDuration] of [["at", 1, 200], ["quit", 2, 200], ["quite", 3, 300], ["seventh", 6, 300], ["eighteen", 7, 500]] as const) {
+    const hidden = pathLineStyle(word, segmentCount, 1, 0, 0, from, to);
+    assert.equal(hidden.strokeDashoffset, 5);
+    assert.equal(hidden.transition, "none");
+    const segmentIndex = segmentCount - 1;
+    const duration = totalDuration / segmentCount;
+    const visible = pathLineStyle(word, segmentCount, 1, segmentIndex, 1, from, to);
+    assert.equal(visible.strokeDashoffset, 0);
+    assert.equal(visible.transition, `stroke-dashoffset ${duration}ms linear ${duration * segmentIndex}ms`);
+    assert.equal(pathLineStyle(word, segmentCount, 1, segmentIndex, 2, from, to).transition, visible.transition);
+  }
 });
 
 test("speech reads only words in order, pauses between them, and cancels pending words", (t) => {
