@@ -8,6 +8,7 @@ export function createWordSpeech<T extends Utterance>(
   createUtterance: (text: string) => T,
   reportError: (message: string) => void,
   onWordStart: (index: number) => void = () => {},
+  onComplete: (success: boolean) => void = () => {},
 ) {
   let revision = 0;
   let active: T | null = null;
@@ -54,6 +55,8 @@ export function createWordSpeech<T extends Utterance>(
           active = null;
           revision++;
           reportError(`Speech failed: ${event.error}`);
+          if (revealWords)
+            onComplete(false);
         };
         utterance.onend = () => {
           if (revision !== current || active !== utterance)
@@ -65,6 +68,9 @@ export function createWordSpeech<T extends Utterance>(
               speakWord(index + 1);
             }, 300);
           }
+          else if (revealWords) {
+            onComplete(true);
+          }
         };
         synthesis.speak(utterance);
       }
@@ -72,6 +78,8 @@ export function createWordSpeech<T extends Utterance>(
         active = null;
         revision++;
         reportError(`Unable to start speech: ${error instanceof Error ? error.message : String(error)}`);
+        if (revealWords)
+          onComplete(false);
       }
     }
     speakWord(0);

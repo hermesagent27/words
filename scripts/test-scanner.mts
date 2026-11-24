@@ -5,7 +5,7 @@ import { projectBoardPoint } from "../app/utils/boardGeometry.ts";
 import { isBoardObstructed } from "../app/utils/boardObstruction.ts";
 import { createBoardConsensus, createWordChangeMonitor, currentConfirmedBoard, hasEnoughReadableTiles } from "../app/utils/consensus.ts";
 import { isNarrowI } from "../app/utils/ocrGlyph.ts";
-import { pathLineStyle } from "../app/utils/pathAnimation.ts";
+import { createSilentPathSequence, pathLineStyle } from "../app/utils/pathAnimation.ts";
 import { solveBoard, suggestedWords, Trie } from "../app/utils/solver.ts";
 import { createWordSpeech } from "../app/utils/wordSpeech.ts";
 
@@ -192,16 +192,32 @@ test("path segments share the whole-word duration based on spelled length", () =
   const from = { x: 0, y: 0 };
   const to = { x: 3, y: 4 };
   for (const [word, segmentCount, totalDuration] of [["at", 1, 200], ["quit", 2, 200], ["quite", 3, 300], ["seventh", 6, 300], ["eighteen", 7, 500]] as const) {
-    const hidden = pathLineStyle(word, segmentCount, 1, 0, 0, from, to);
-    assert.equal(hidden.strokeDashoffset, 5);
-    assert.equal(hidden.transition, "none");
     const segmentIndex = segmentCount - 1;
     const duration = totalDuration / segmentCount;
-    const visible = pathLineStyle(word, segmentCount, 1, segmentIndex, 1, from, to);
-    assert.equal(visible.strokeDashoffset, 0);
-    assert.equal(visible.transition, `stroke-dashoffset ${duration}ms linear ${duration * segmentIndex}ms`);
-    assert.equal(pathLineStyle(word, segmentCount, 1, segmentIndex, 2, from, to).transition, visible.transition);
+    const style = pathLineStyle(word, segmentCount, segmentIndex, from, to);
+    assert.equal(style.strokeDashoffset, 5);
+    assert.equal(style.animation, `draw-path-line ${duration}ms linear ${duration * segmentIndex}ms forwards, fade-path-line 150ms linear ${totalDuration}ms forwards`);
   }
+});
+
+test("silent paths animate in order and cancel when replaced", (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  const actions: (number | string)[] = [];
+  const sequence = createSilentPathSequence(index => actions.push(index), () => actions.push("done"));
+  sequence.start(["quit", "seventh"]);
+  assert.deepEqual(actions, [0]);
+  t.mock.timers.tick(499);
+  assert.deepEqual(actions, [0]);
+  t.mock.timers.tick(1);
+  assert.deepEqual(actions, [0, 1]);
+  sequence.stop();
+  t.mock.timers.tick(1000);
+  assert.deepEqual(actions, [0, 1]);
+  sequence.start(["eighteen"]);
+  t.mock.timers.tick(649);
+  assert.deepEqual(actions, [0, 1, 0]);
+  t.mock.timers.tick(1);
+  assert.deepEqual(actions, [0, 1, 0, "done"]);
 });
 
 test("speech reads only words in order, pauses between them, and cancels pending words", (t) => {
@@ -210,6 +226,7 @@ test("speech reads only words in order, pauses between them, and cancels pending
   const actions: string[] = [];
   const requests: Request[] = [];
   const startedWords: number[] = [];
+  const completed: boolean[] = [];
   const speech = createWordSpeech(
     {
       cancel: () => { actions.push("cancel"); },
@@ -221,6 +238,7 @@ test("speech reads only words in order, pauses between them, and cancels pending
     (text: string): Request => ({ text, rate: 1, onstart: null, onend: null, onerror: null }),
     message => assert.fail(message),
     index => startedWords.push(index),
+    success => completed.push(success),
   );
   speech.speak([
     { word: "now", path: [{ row: 0, col: 0 }, { row: 0, col: 3 }, { row: 3, col: 3 }] },
@@ -248,8 +266,12 @@ test("speech reads only words in order, pauses between them, and cancels pending
   speech.stop();
   requests[2]!.onstart!.call({} as SpeechSynthesisUtterance, {} as SpeechSynthesisEvent);
   assert.deepEqual(startedWords, [0, 1, 0]);
+  assert.deepEqual(completed, []);
   t.mock.timers.tick(300);
   assert.deepEqual(actions, ["now", "rut", "new"]);
+  speech.speak([{ word: "last", path: [{ row: 0, col: 0 }] }]);
+  requests[3]!.onend!.call({} as SpeechSynthesisUtterance, {} as SpeechSynthesisEvent);
+  assert.deepEqual(completed, [true]);
 });
 
 test("speech enabled before a board is ready resumes on refreshed boards", () => {
@@ -290,6 +312,7 @@ test("speech enabled before a board is ready resumes on refreshed boards", () =>
 test("speech reports failures instead of silently appearing to work", () => {
   type Request = { text: string; rate: number; onstart: SpeechSynthesisUtterance["onstart"]; onend: SpeechSynthesisUtterance["onend"]; onerror: SpeechSynthesisUtterance["onerror"] };
   const errors: string[] = [];
+  const completed: boolean[] = [];
   const speech = createWordSpeech(
     {
       cancel: () => {},
@@ -297,7 +320,10 @@ test("speech reports failures instead of silently appearing to work", () => {
     },
     (text: string): Request => ({ text, rate: 1, onstart: null, onend: null, onerror: null }),
     message => errors.push(message),
+    () => {},
+    success => completed.push(success),
   );
   speech.speak([{ word: "cat", path: [{ row: 0, col: 0 }] }]);
   assert.deepEqual(errors, ["Unable to start speech: blocked"]);
+  assert.deepEqual(completed, [false]);
 });

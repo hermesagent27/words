@@ -1,12 +1,46 @@
 import type { Point } from "./boardGeometry";
 
-export function pathLineStyle(word: string, segmentCount: number, wordIndex: number, segmentIndex: number, revealedWordIndex: number, from: Point, to: Point) {
+export function pathAnimationDuration(word: string): number {
+  return word.length <= 4 ? 200 : word.length <= 7 ? 300 : 500;
+}
+
+export function pathLineStyle(word: string, segmentCount: number, segmentIndex: number, from: Point, to: Point) {
   const length = Math.hypot(to.x - from.x, to.y - from.y);
-  const duration = (word.length <= 4 ? 200 : word.length <= 7 ? 300 : 500) / segmentCount;
-  const visible = wordIndex <= revealedWordIndex;
+  const duration = pathAnimationDuration(word) / segmentCount;
   return {
     strokeDasharray: `${length} ${length}`,
-    strokeDashoffset: visible ? 0 : length,
-    transition: visible ? `stroke-dashoffset ${duration}ms linear ${segmentIndex * duration}ms` : "none",
+    strokeDashoffset: length,
+    animation: `draw-path-line ${duration}ms linear ${segmentIndex * duration}ms forwards, fade-path-line 150ms linear ${pathAnimationDuration(word)}ms forwards`,
   };
+}
+
+export function createSilentPathSequence(onWordStart: (index: number) => void, onComplete: () => void) {
+  let timer: ReturnType<typeof setTimeout> | null = null;
+  let revision = 0;
+
+  function stop() {
+    revision++;
+    if (timer !== null)
+      clearTimeout(timer);
+    timer = null;
+  }
+
+  function start(words: string[]) {
+    stop();
+    const current = revision;
+    function next(index: number) {
+      if (current !== revision)
+        return;
+      if (index >= words.length) {
+        timer = null;
+        onComplete();
+        return;
+      }
+      onWordStart(index);
+      timer = setTimeout(() => next(index + 1), pathAnimationDuration(words[index]!) + (index + 1 < words.length ? 300 : 150));
+    }
+    next(0);
+  }
+
+  return { start, stop };
 }

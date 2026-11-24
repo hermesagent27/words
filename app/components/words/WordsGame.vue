@@ -4,7 +4,7 @@ import type { ScoredWord, Tile } from "~/utils/solver";
 
 import { projectBoardPoint } from "~/utils/boardGeometry";
 import { createBoardConsensus, createWordChangeMonitor, currentConfirmedBoard, hasEnoughReadableTiles } from "~/utils/consensus";
-import { pathLineStyle } from "~/utils/pathAnimation";
+import { createSilentPathSequence, pathAnimationDuration, pathLineStyle } from "~/utils/pathAnimation";
 import { predictedBoards, predictPathPosition, suggestedWords } from "~/utils/solver";
 import { createWordSpeech } from "~/utils/wordSpeech";
 
@@ -18,7 +18,8 @@ const frozen = ref<{ width: number; height: number } | null>(null);
 const speechEnabled = ref(false);
 const speechSupported = ref(false);
 const speechError = ref<string | null>(null);
-const revealedWordIndex = ref(-1);
+const animatedWords = ref<number[]>([]);
+const animationRun = ref(0);
 const scanning = ref(false);
 const processedSnapshots = ref(0);
 const detection = ref<Point[] | null>(null);
@@ -31,19 +32,78 @@ const colors = ["#ef4444", "#facc15", "#16a34a", "#3b82f6"];
 const fallbackColor = "#000000";
 let scanTimer: ReturnType<typeof setInterval> | null = null;
 let refreshTimer: ReturnType<typeof setTimeout> | null = null;
+let completionTimer: ReturnType<typeof setTimeout> | null = null;
+let animationEndsAt = 0;
+let playbackActive = false;
+let refreshDue = false;
 let revision = 0;
 let working = false;
 let pending: { frame: HTMLCanvasElement; revision: number } | null = null;
 let monitor: ReturnType<typeof createWordChangeMonitor> | null = null;
 let speech: ReturnType<typeof createWordSpeech<SpeechSynthesisUtterance>> | null = null;
+const silentSequence = createSilentPathSequence(animateWord, finishPlayback);
+
+function animateWord(index: number) {
+  const word = selectedWords.value[index];
+  if (word && !animatedWords.value.includes(index)) {
+    animatedWords.value = [...animatedWords.value, index];
+    animationEndsAt = Math.max(animationEndsAt, Date.now() + pathAnimationDuration(word.word) + 150);
+  }
+}
+
+function finishPlayback() {
+  playbackActive = false;
+  if (refreshDue && frozen.value && scanning.value) {
+    resetBoard();
+    captureSnapshot();
+  }
+}
+
+function finishSpokenPlayback(success: boolean) {
+  if (!success) {
+    startPlayback(false);
+    return;
+  }
+  const remaining = Math.max(0, animationEndsAt - Date.now());
+  if (!remaining) {
+    finishPlayback();
+    return;
+  }
+  completionTimer = setTimeout(() => {
+    completionTimer = null;
+    finishPlayback();
+  }, remaining);
+}
 
 function stopSpeech() {
+  silentSequence.stop();
+  if (completionTimer !== null)
+    clearTimeout(completionTimer);
+  completionTimer = null;
+  animationEndsAt = 0;
+  playbackActive = false;
   speech?.stop();
-  revealedWordIndex.value = -1;
+  animatedWords.value = [];
+}
+
+function startPlayback(spoken: boolean) {
+  stopSpeech();
+  animationRun.value++;
+  playbackActive = true;
+  if (spoken && speech) {
+    speechError.value = null;
+    speech.speak(selectedWords.value);
+    lastSpokenSignature = lastSignature.value;
+  }
+  else {
+    silentSequence.start(selectedWords.value.map(word => word.word));
+  }
 }
 
 function resetBoard() {
   clearRefreshTimer();
+  stopSpeech();
+  refreshDue = false;
   revision++;
   pending = null;
   consensus.reset();
@@ -52,7 +112,6 @@ function resetBoard() {
   detection.value = null;
   tiles.value = null;
   selectedWords.value = [];
-  revealedWordIndex.value = -1;
   lastSignature.value = "";
   statusLine.value = "Looking for board…";
 }
@@ -66,8 +125,14 @@ function clearRefreshTimer() {
 function scheduleBoardRefresh() {
   clearRefreshTimer();
   refreshTimer = setTimeout(() => {
-    resetBoard();
-    captureSnapshot();
+    refreshTimer = null;
+    if (playbackActive) {
+      refreshDue = true;
+    }
+    else {
+      resetBoard();
+      captureSnapshot();
+    }
   }, 2000);
 }
 
@@ -79,11 +144,12 @@ function toggleSpeech() {
   if (!speechEnabled.value) {
     stopSpeech();
     lastSpokenSignature = "";
+    if (frozen.value)
+      startPlayback(false);
     return;
   }
   if (frozen.value) {
-    speech.speak(selectedWords.value);
-    lastSpokenSignature = lastSignature.value;
+    startPlayback(true);
   }
   else {
     speech.enable();
@@ -109,8 +175,17 @@ async function submitRemoveWord() {
     if (result.removed) {
       wordToRemove.value = "";
       lastSignature.value = "";
-      if (tiles.value)
+      if (tiles.value) {
         solveCurrent(tiles.value);
+        if (frozen.value && selectedWords.value.length) {
+          monitor = createWordChangeMonitor(tiles.value, selectedWords.value);
+          startPlayback(speechEnabled.value && !!speech);
+        }
+        else if (frozen.value) {
+          resetBoard();
+          captureSnapshot();
+        }
+      }
     }
   }
   finally {
@@ -172,16 +247,11 @@ function lockSnapshot(frame: HTMLCanvasElement, board: Tile[][]) {
   context.drawImage(frame, 0, 0);
   frozen.value = { width: frame.width, height: frame.height };
   monitor = createWordChangeMonitor(board, selectedWords.value);
-  revealedWordIndex.value = -1;
   statusLine.value = selectedWords.value.length > 2
     ? "Board locked — refreshing shortly or when a suggested word changes"
     : `Board locked — refreshing shortly (0/${selectedWords.value.length} suggested words changed)`;
   scheduleBoardRefresh();
-  if (speechEnabled.value && speech && lastSpokenSignature !== lastSignature.value) {
-    speechError.value = null;
-    speech.speak(selectedWords.value);
-    lastSpokenSignature = lastSignature.value;
-  }
+  startPlayback(speechEnabled.value && !!speech && lastSpokenSignature !== lastSignature.value);
 }
 
 function startScanning() {
@@ -198,6 +268,7 @@ function stopScanning() {
     clearInterval(scanTimer);
   scanTimer = null;
   clearRefreshTimer();
+  refreshDue = false;
   scanning.value = false;
   revision++;
   pending = null;
@@ -267,6 +338,7 @@ async function processSnapshots() {
           continue;
         }
         clearRefreshTimer();
+        refreshDue = false;
         stopSpeech();
         lastSpokenSignature = "";
         monitor = null;
@@ -304,7 +376,8 @@ onMounted(async () => {
       window.speechSynthesis,
       text => new SpeechSynthesisUtterance(text),
       message => speechError.value = message,
-      index => revealedWordIndex.value = index,
+      animateWord,
+      finishSpokenPlayback,
     );
     speechSupported.value = true;
   }
@@ -432,7 +505,6 @@ onUnmounted(() => {
                   :x2="point.x"
                   :y2="point.y"
                   :stroke="colorAt(index)"
-                  :style="pathLineStyle(selectedWords[index]!.word, path.length - 1, index, i, revealedWordIndex, path[i]!, point)"
                   stroke-width="12"
                   stroke-linecap="round"
                 />
@@ -446,6 +518,24 @@ onUnmounted(() => {
                 stroke="white"
                 stroke-width="3"
               />
+            </template>
+            <template v-for="(path, index) in paths" :key="`animation-${animationRun}-${index}`">
+              <template v-for="(point, i) in path.slice(1)" :key="i">
+                <g v-if="animatedWords.includes(index)">
+                  <line
+                    v-for="stroke in ['black', 'white']"
+                    :key="stroke"
+                    :x1="path[i]!.x"
+                    :y1="path[i]!.y"
+                    :x2="point.x"
+                    :y2="point.y"
+                    :stroke="stroke"
+                    :style="pathLineStyle(selectedWords[index]!.word, path.length - 1, i, path[i]!, point)"
+                    :stroke-width="stroke === 'black' ? 10 : 5"
+                    stroke-linecap="round"
+                  />
+                </g>
+              </template>
             </template>
           </svg>
         </div>
@@ -497,3 +587,17 @@ onUnmounted(() => {
     </div>
   </div>
 </template>
+
+<style>
+@keyframes draw-path-line {
+  to {
+    stroke-dashoffset: 0;
+  }
+}
+
+@keyframes fade-path-line {
+  to {
+    opacity: 0;
+  }
+}
+</style>
