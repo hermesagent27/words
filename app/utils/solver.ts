@@ -47,6 +47,30 @@ export class Trie {
     }
     return node.isWord;
   }
+
+  /** Remove a single entry; pruning empty branches keeps enumeration clean. */
+  remove(word: string): boolean {
+    const chain: [TrieNode, string][] = [];
+    let node = this.root;
+    for (const ch of word) {
+      const next = node.children.get(ch);
+      if (!next)
+        return false;
+      chain.push([node, ch]);
+      node = next;
+    }
+    if (!node.isWord)
+      return false;
+    node.isWord = false;
+    for (let i = chain.length - 1; i >= 0; i--) {
+      const [parent, ch] = chain[i]!;
+      const child = parent.children.get(ch)!;
+      if (child.isWord || child.children.size)
+        break;
+      parent.children.delete(ch);
+    }
+    return true;
+  }
 }
 
 const DIRS = [
@@ -145,9 +169,13 @@ function selectNonOverlappingWords(paths: ScoredWord[]): ScoredWord[] {
       || a.word.localeCompare(b.word);
   }
 
+  /**
+   * Check that a play order survives gravity: after removing every word played
+   * before it, each word's tiles must fall into a still-adjacent path.
+   */
   function playable(words: ScoredWord[]): boolean {
     let removed = 0;
-    for (const word of [...words].sort(topDown)) {
+    for (const word of words) {
       const fallen = word.path.map(({ row, col }) => {
         let destination = row;
         for (let below = row + 1; below < 4; below++) {
@@ -168,24 +196,47 @@ function selectNonOverlappingWords(paths: ScoredWord[]): ScoredWord[] {
     return true;
   }
 
-  function isBetter(candidate: ScoredWord[], current: ScoredWord[]): boolean {
-    const candidateByLength = [...candidate].sort((a, b) => b.word.length - a.word.length || a.word.localeCompare(b.word));
-    const currentByLength = [...current].sort((a, b) => b.word.length - a.word.length || a.word.localeCompare(b.word));
-    for (let i = 0; i < Math.max(candidateByLength.length, currentByLength.length); i++) {
-      const difference = (candidateByLength[i]?.word.length ?? 0) - (currentByLength[i]?.word.length ?? 0);
-      if (difference)
-        return difference > 0;
+  /**
+   * Order words top-down, but play the largest word first whenever doing so
+   * leaves the smaller words' paths intact after they fall.
+   */
+  function orderForPlay(words: ScoredWord[]): ScoredWord[] {
+    const ordered = [...words].sort(topDown);
+    let best = playable(ordered) ? ordered : null;
+    for (const word of words) {
+      if (word.word.length > (best ? best[0]!.word.length : 0)) {
+        const candidate = [word, ...ordered.filter(other => other !== word)];
+        if (playable(candidate) && (!best || isBetter(candidate, best)))
+          best = candidate;
+      }
     }
-    for (let i = 0; i < candidateByLength.length; i++) {
-      const difference = candidateByLength[i]!.word.localeCompare(currentByLength[i]!.word);
+    return best ?? [...words].sort(topDown);
+  }
+
+  function isBetter(candidate: ScoredWord[], current: ScoredWord[]): boolean {
+    // Compare sets by their best achievable play order, not the arbitrary order
+    // words were added during selection. Largest-first is the priority, then
+    // more words, then alphabetical for stability.
+    const candidateOrder = orderForPlay(candidate);
+    const currentOrder = orderForPlay(current);
+    const leadDifference = (candidateOrder[0]?.word.length ?? 0) - (currentOrder[0]?.word.length ?? 0);
+    if (leadDifference)
+      return leadDifference > 0;
+    if (candidateOrder.length !== currentOrder.length)
+      return candidateOrder.length > currentOrder.length;
+    const candidateProfile = candidateOrder.map(word => word.word).sort();
+    const currentProfile = currentOrder.map(word => word.word).sort();
+    for (let i = 0; i < candidateProfile.length; i++) {
+      const difference = candidateProfile[i]!.localeCompare(currentProfile[i]!);
       if (difference)
         return difference < 0;
     }
     return false;
   }
   function choose(start: number, available: number, used: Set<string>, selected: ScoredWord[]): ScoredWord[] {
-    // A word added later in the search may be played earlier and repair an invalid path.
-    let best = playable(selected) ? selected : [];
+    // Sets are judged in the top-down order they would fall back to, so a word
+    // played earlier can still repair a later word's path during selection.
+    let best = playable([...selected].sort(topDown)) ? selected : [];
     let nextLength = 0;
     for (let index = start; index < candidates.length; index++) {
       const candidate = candidates[index]!;
@@ -205,7 +256,7 @@ function selectNonOverlappingWords(paths: ScoredWord[]): ScoredWord[] {
     }
     return best;
   }
-  return choose(0, 0xFFFF, new Set<string>(), []).sort(topDown);
+  return orderForPlay(choose(0, 0xFFFF, new Set<string>(), []));
 }
 
 /** Show long, non-overlapping words in a top-down order that survives gravity. */
@@ -240,6 +291,38 @@ export function applyGravity(tiles: Tile[][], path: PathStep[]): Tile[][] {
     }
   }
   return result;
+}
+
+/**
+ * Predict the board positions where a word's letters will sit after every word
+ * before it is played. Unknown letters entering from the top are blank, so the
+ * tail of a path may sit on cells whose letters are not yet known.
+ */
+export function predictPathPosition(path: PathStep[], playedBefore: PathStep[][]): PathStep[] {
+  const removed = new Set(playedBefore.flat().map(step => `${step.row},${step.col}`));
+  return path.map(({ row, col }) => {
+    let destination = row;
+    for (let below = row + 1; below < 4; below++) {
+      if (removed.has(`${below},${col}`))
+        destination++;
+    }
+    return { row: destination, col };
+  });
+}
+
+/**
+ * Predict the letter at every board cell before each play in the order.
+ * Before play 1 the board is untouched; after each play the survivors fall
+ * and new blank cells appear at the top.
+ */
+export function predictedBoards(tiles: Tile[][], words: ScoredWord[]): Tile[][][] {
+  const boards: Tile[][][] = [];
+  let current = tiles;
+  for (const word of words) {
+    boards.push(current);
+    current = applyGravity(current, word.path);
+  }
+  return boards;
 }
 
 export function wordPathChanged(board: Tile[][], observed: Tile[][], path: PathStep[]): boolean {

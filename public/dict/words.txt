@@ -1475,7 +1475,6 @@ amid
 amidships
 amigo
 amigos
-amino
 amiss
 amity
 ammeter
@@ -11940,7 +11939,6 @@ deathless
 deathlike
 deathly
 deaths
-deaves
 deb
 debacle
 debacles
@@ -23096,7 +23094,6 @@ hotheadedness
 hotheads
 hothouse
 hothouses
-hotkey
 hotkeys
 hotly
 hotness
@@ -26381,7 +26378,6 @@ kestrels
 ketch
 ketches
 ketchup
-keto
 ketogenic
 kettle
 kettledrum
@@ -31748,7 +31744,6 @@ nominative
 nominatives
 nominee
 nominees
-non
 nonabrasive
 nonabsorbent
 nonabsorbents
@@ -45674,7 +45669,6 @@ spore
 spored
 spores
 sporing
-sporran
 sport
 sported
 sporting
@@ -46295,8 +46289,6 @@ stepdad
 stepdads
 stepladder
 stepladders
-stepmom
-stepmoms
 stepparent
 stepparents
 steppe

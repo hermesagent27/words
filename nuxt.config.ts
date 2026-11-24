@@ -30,5 +30,7 @@ export default defineNuxtConfig({
   },
   runtimeConfig: {
     authPassword: process.env.APP_PASSWORD || process.env.AUTH_PASSWORD || "changeme",
+    githubToken: process.env.GITHUB_TOKEN || "",
+    githubRepo: process.env.GITHUB_REPO || "hermesagent27/words",
   },
 });

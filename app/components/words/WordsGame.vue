@@ -4,10 +4,10 @@ import type { ScoredWord, Tile } from "~/utils/solver";
 
 import { projectBoardPoint } from "~/utils/boardGeometry";
 import { createBoardConsensus, createWordChangeMonitor, currentConfirmedBoard, hasEnoughReadableTiles } from "~/utils/consensus";
-import { suggestedWords } from "~/utils/solver";
+import { predictedBoards, predictPathPosition, suggestedWords } from "~/utils/solver";
 import { createWordSpeech } from "~/utils/wordSpeech";
 
-const { trie, error: dictionaryError, load: loadWords } = useWordList();
+const { trie, error: dictionaryError, load: loadWords, remove: removeWord } = useWordList();
 const { videoEl, canvasEl, ready: cameraReady, error: cameraError, start: startCamera, stop: stopCamera, captureFrame } = useCamera();
 const { error: ocrError, detectGrid } = useOcr();
 const consensus = createBoardConsensus();
@@ -25,13 +25,8 @@ const selectedWords = ref<ScoredWord[]>([]);
 const statusLine = ref("Starting…");
 const lastSignature = ref("");
 let lastSpokenSignature = "";
-const colors = [
-  ["#ef4444", "#f97316"],
-  ["#facc15", "#84cc16"],
-  ["#16a34a", "#14b8a6"],
-  ["#7dd3fc", "#a855f7"],
-];
-const defaultColors = ["#000000", "#000000"];
+const colors = ["#ef4444", "#facc15", "#16a34a", "#3b82f6"];
+const fallbackColor = "#000000";
 let scanTimer: ReturnType<typeof setInterval> | null = null;
 let refreshTimer: ReturnType<typeof setTimeout> | null = null;
 let revision = 0;
@@ -87,6 +82,34 @@ function toggleSpeech() {
   }
 }
 
+const settingsOpen = ref(false);
+const wordToRemove = ref("");
+const removingWord = ref(false);
+const removeWordMessage = ref<string | null>(null);
+
+async function submitRemoveWord() {
+  const word = wordToRemove.value.trim().toLowerCase();
+  if (!word || removingWord.value)
+    return;
+  removingWord.value = true;
+  removeWordMessage.value = null;
+  try {
+    const result = await removeWord(word);
+    removeWordMessage.value = result.persisted === "github"
+      ? `Removed "${word}" from the dictionary.`
+      : (result.message ?? `Removed "${word}" for this session.`);
+    if (result.removed) {
+      wordToRemove.value = "";
+      lastSignature.value = "";
+      if (tiles.value)
+        solveCurrent(tiles.value);
+    }
+  }
+  finally {
+    removingWord.value = false;
+  }
+}
+
 function solveCurrent(board: Tile[][]) {
   tiles.value = board;
   if (!trie.value)
@@ -95,27 +118,34 @@ function solveCurrent(board: Tile[][]) {
   if (signature === lastSignature.value)
     return;
   lastSignature.value = signature;
-  selectedWords.value = suggestedWords(board, trie.value);
+  selectedWords.value = suggestedWords(board, trie.value).slice(0, 4);
 }
 
+/**
+ * Draw every remaining word where its letters WILL sit when it is that word's
+ * turn, applying gravity from the words played before it. New letters entering
+ * from the top keep their predicted (blank) positions, so lines aim at where
+ * tiles land rather than where they currently are.
+ */
 const paths = computed(() => {
-  if (!detection.value)
+  if (!detection.value || !tiles.value)
     return [];
   const corners = detection.value;
-  return selectedWords.value.map(word => word.path.map(step =>
-    projectBoardPoint(corners, (step.col + 0.5) / 4, (step.row + 0.5) / 4)));
+  return selectedWords.value.map((word, index) =>
+    predictPathPosition(word.path, selectedWords.value.slice(0, index).map(previous => previous.path))
+      .map(step => projectBoardPoint(corners, (step.col + 0.5) / 4, (step.row + 0.5) / 4)));
 });
 
-function colorAt(index: number, fraction: number): string {
-  const pair = colors[index] ?? defaultColors;
-  const from = pair[0]!;
-  const to = pair[1]!;
-  const channels = [1, 3, 5].map((offset) => {
-    const a = Number.parseInt(from.slice(offset, offset + 2), 16);
-    const b = Number.parseInt(to.slice(offset, offset + 2), 16);
-    return Math.round(a + (b - a) * fraction);
-  });
-  return `rgb(${channels.join(",")})`;
+/** Predicted letters for the board right before each play; drives the board read-out. */
+const predictedTiles = computed(() => {
+  if (!tiles.value || !selectedWords.value.length)
+    return [] as string[];
+  return predictedBoards(tiles.value, selectedWords.value)
+    .map(board => board.map(row => row.map(tile => tile.letter === "Q" ? "QU" : tile.letter || "?").join(" ")).join(" / "));
+});
+
+function colorAt(index: number): string {
+  return colors[index] ?? fallbackColor;
 }
 
 function lockSnapshot(frame: HTMLCanvasElement, board: Tile[][]) {
@@ -303,6 +333,53 @@ onUnmounted(() => {
         >
           <Icon :name="speechEnabled ? 'tabler:volume' : 'tabler:volume-off'" />
         </button>
+        <div class="relative">
+          <button
+            class="btn btn-sm btn-ghost"
+            title="Settings"
+            aria-label="Settings"
+            :aria-expanded="settingsOpen"
+            @click.stop="settingsOpen = !settingsOpen"
+          >
+            <Icon name="tabler:settings" />
+          </button>
+          <button
+            v-if="settingsOpen"
+            class="fixed inset-0 z-40 cursor-default bg-transparent"
+            aria-label="Close settings"
+            @click="settingsOpen = false"
+          />
+          <div
+            v-if="settingsOpen"
+            class="absolute right-0 top-full z-50 mt-1 w-64 rounded-lg border-2 border-base-300 bg-base-200 p-2 shadow-lg"
+          >
+            <p class="text-sm font-semibold">
+              Remove a word
+            </p>
+            <p class="text-xs text-base-content/70">
+              Stop the solver from suggesting a word. Saved to the dictionary when the server is connected to GitHub.
+            </p>
+            <form class="mt-1 flex gap-1" @submit.prevent="submitRemoveWord">
+              <input
+                v-model="wordToRemove"
+                type="text"
+                class="input input-sm min-w-0 flex-1"
+                placeholder="word"
+                autocapitalize="off"
+                autocomplete="off"
+                spellcheck="false"
+                :disabled="removingWord"
+              >
+              <button type="submit" class="btn btn-sm btn-primary" :disabled="removingWord || !wordToRemove.trim()">
+                <span v-if="removingWord" class="loading loading-spinner loading-xs" />
+                Remove
+              </button>
+            </form>
+            <p v-if="removeWordMessage" class="mt-1 text-xs text-base-content/70" role="status">
+              {{ removeWordMessage }}
+            </p>
+          </div>
+        </div>
       </div>
     </div>
 
@@ -339,25 +416,12 @@ onUnmounted(() => {
             />
             <template v-for="(path, index) in paths" :key="index">
               <template v-for="(point, i) in path.slice(1)" :key="i">
-                <defs>
-                  <linearGradient
-                    :id="`word-${index}-${i}`"
-                    gradientUnits="userSpaceOnUse"
-                    :x1="path[i]!.x"
-                    :y1="path[i]!.y"
-                    :x2="point.x"
-                    :y2="point.y"
-                  >
-                    <stop offset="0%" :stop-color="colorAt(index, i / (path.length - 1))" />
-                    <stop offset="100%" :stop-color="colorAt(index, (i + 1) / (path.length - 1))" />
-                  </linearGradient>
-                </defs>
                 <line
                   :x1="path[i]!.x"
                   :y1="path[i]!.y"
                   :x2="point.x"
                   :y2="point.y"
-                  :stroke="`url(#word-${index}-${i})`"
+                  :stroke="colorAt(index)"
                   stroke-width="12"
                   stroke-linecap="round"
                 />
@@ -366,8 +430,8 @@ onUnmounted(() => {
                 v-if="path[0]"
                 :cx="path[0].x"
                 :cy="path[0].y"
-                r="24"
-                :fill="colorAt(index, 0)"
+                r="30"
+                :fill="colorAt(index)"
                 stroke="white"
                 stroke-width="3"
               />
@@ -403,14 +467,15 @@ onUnmounted(() => {
             Play in this order
           </h2>
           <p class="text-xs text-base-content/70">
-            Paths show the original board; tiles may move after each word.
+            Paths show where each word's letters will be when it is played.
           </p>
           <div class="flex flex-wrap gap-x-3 gap-y-1">
             <div v-for="(word, i) in selectedWords" :key="`${word.word}-${i}`" class="flex items-baseline gap-1">
-              <span :style="{ color: colorAt(i, 0) }" aria-hidden="true">●</span>
+              <span :style="{ color: colorAt(i) }" aria-hidden="true">●</span>
               <span class="text-xs">{{ i + 1 }}.</span>
               <span class="text-base font-semibold tracking-wide">{{ word.word.toUpperCase() }}</span>
               <span class="text-xs text-base-content/70">{{ word.score }} pts</span>
+              <span v-if="predictedTiles[i + 1]" class="font-mono text-xs text-base-content/70">→ {{ predictedTiles[i + 1] }}</span>
             </div>
           </div>
         </div>
