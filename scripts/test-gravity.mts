@@ -44,23 +44,21 @@ test("suggestions remain playable in top-down order after each fall", () => {
   assert.equal(moved, true);
 });
 
-test("the largest word leads even when fewer words survive", () => {
-  // With chko + bgjmn, keeping both means playing smaller-first; leading with
-  // the largest is the priority, so bgjmn goes first and chko is dropped.
+test("the largest word leads when the smaller path remains playable", () => {
+  // Both words remain playable after bgjmn is removed.
   const words = suggestedWords(board(["ABCD", "EFGH", "IJKL", "MNOP"]), dictionary("chko", "bgjmn"));
-  assert.deepEqual(words.map(word => word.word), ["bgjmn"]);
+  assert.deepEqual(words.map(word => word.word), ["bgjmn", "chko"]);
 });
 
-test("a longer word leads even when it would drop a disjoint shorter word", () => {
-  // mjeb and nolkf never share a tile and both survive gravity, so the longer
-  // word leads and the shorter one follows.
+test("a shorter word leads when playing the longer word first breaks its path", () => {
+  // Playing nolkf first separates mjeb's original path after gravity.
   const words = suggestedWords(board(["ABCD", "EFGH", "IJKL", "MNOP"]), dictionary("mjeb", "nolkf"));
-  assert.deepEqual(words.map(word => word.word), ["nolkf", "mjeb"]);
+  assert.deepEqual(words.map(word => word.word), ["mjeb", "nolkf"]);
 });
 
-test("an earlier short word can make two longer words playable together", () => {
+test("the largest word leads when all follow-up paths remain playable", () => {
   const words = suggestedWords(board(["ABCD", "EFGH", "IJKL", "MNOP"]), dictionary("kfein", "dhlo", "jgc"));
-  assert.deepEqual(words.map(word => word.word), ["jgc", "dhlo", "kfein"]);
+  assert.deepEqual(words.map(word => word.word), ["kfein", "dhlo", "jgc"]);
 });
 
 test("unused letters fall in order and new cells appear at the top", () => {
@@ -135,14 +133,13 @@ test("predictPathPosition only moves tiles above cells removed by earlier words"
 });
 
 test("predictedBoards drops survivors and blanks the top row after each play", () => {
-  // After jgc clears its own tiles, nolkf's letters settle onto the bottom row
-  // and the rest of the column falls into place.
+  // nolkf leads because jgc remains playable after its tiles fall.
   const original = board(["ABCD", "EFGH", "IJKL", "MNOP"]);
   const words = suggestedWords(original, dictionary("afj", "nolkf", "jgc"));
   const boards = predictedBoards(original, words);
   assert.equal(boards.length, words.length);
   assert.deepEqual(letters(boards[0]!), ["ABCD", "EFGH", "IJKL", "MNOP"]);
-  assert.deepEqual(letters(boards[1]!), ["A..D", "EB.H", "IFKL", "MNOP"]);
+  assert.deepEqual(letters(boards[1]!), ["A...", "E..D", "IBCH", "MJGP"]);
 });
 
 test("the trie forgets removed words but keeps words built on the same letters", () => {

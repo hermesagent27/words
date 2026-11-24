@@ -169,63 +169,66 @@ function selectNonOverlappingWords(paths: ScoredWord[]): ScoredWord[] {
       || a.word.localeCompare(b.word);
   }
 
-  /**
-   * Check that a play order survives gravity: after removing every word played
-   * before it, each word's tiles must fall into a still-adjacent path.
-   */
-  function playable(words: ScoredWord[]): boolean {
-    let removed = 0;
-    for (const word of words) {
-      const fallen = word.path.map(({ row, col }) => {
-        let destination = row;
-        for (let below = row + 1; below < 4; below++) {
-          if (removed & (1 << (below * 4 + col)))
-            destination++;
-        }
-        return { row: destination, col };
-      });
-      for (let i = 1; i < fallen.length; i++) {
-        if (Math.abs(fallen[i]!.row - fallen[i - 1]!.row) > 1
-          || Math.abs(fallen[i]!.col - fallen[i - 1]!.col) > 1) {
-          return false;
-        }
+  function playable(word: ScoredWord, removed: number): boolean {
+    const fallen = word.path.map(({ row, col }) => {
+      let destination = row;
+      for (let below = row + 1; below < 4; below++) {
+        if (removed & (1 << (below * 4 + col)))
+          destination++;
       }
-      for (const { row, col } of word.path)
-        removed |= 1 << (row * 4 + col);
+      return { row: destination, col };
+    });
+    for (let i = 1; i < fallen.length; i++) {
+      if (Math.abs(fallen[i]!.row - fallen[i - 1]!.row) > 1
+        || Math.abs(fallen[i]!.col - fallen[i - 1]!.col) > 1) {
+        return false;
+      }
     }
     return true;
   }
 
-  /**
-   * Order words top-down, but play the largest word first whenever doing so
-   * leaves the smaller words' paths intact after they fall.
-   */
+  /** Prefer longer words, backtracking when that prevents a playable sequence. */
   function orderForPlay(words: ScoredWord[]): ScoredWord[] {
-    const ordered = [...words].sort(topDown);
-    let best = playable(ordered) ? ordered : null;
-    for (const word of words) {
-      if (word.word.length > (best ? best[0]!.word.length : 0)) {
-        const candidate = [word, ...ordered.filter(other => other !== word)];
-        if (playable(candidate) && (!best || isBetter(candidate, best)))
-          best = candidate;
+    const candidates = words.map((word, index) => ({
+      index,
+      mask: word.path.reduce((bits, step) => bits | (1 << (step.row * 4 + step.col)), 0),
+      word,
+    })).sort((a, b) => b.word.word.length - a.word.word.length || topDown(a.word, b.word));
+    const memo = new Map<number, ScoredWord[] | null>();
+
+    function findOrder(remaining: number, removed: number): ScoredWord[] | null {
+      if (!remaining)
+        return [];
+      if (memo.has(remaining))
+        return memo.get(remaining)!;
+      for (const candidate of candidates) {
+        const bit = 1 << candidate.index;
+        if (!(remaining & bit) || !playable(candidate.word, removed))
+          continue;
+        const rest = findOrder(remaining ^ bit, removed | candidate.mask);
+        if (rest) {
+          const result = [candidate.word, ...rest];
+          memo.set(remaining, result);
+          return result;
+        }
       }
+      memo.set(remaining, null);
+      return null;
     }
-    return best ?? [...words].sort(topDown);
+
+    return findOrder((1 << words.length) - 1, 0) ?? [];
   }
 
   function isBetter(candidate: ScoredWord[], current: ScoredWord[]): boolean {
-    // Compare sets by their best achievable play order, not the arbitrary order
-    // words were added during selection. Largest-first is the priority, then
-    // more words, then alphabetical for stability.
-    const candidateOrder = orderForPlay(candidate);
-    const currentOrder = orderForPlay(current);
-    const leadDifference = (candidateOrder[0]?.word.length ?? 0) - (currentOrder[0]?.word.length ?? 0);
-    if (leadDifference)
-      return leadDifference > 0;
-    if (candidateOrder.length !== currentOrder.length)
-      return candidateOrder.length > currentOrder.length;
-    const candidateProfile = candidateOrder.map(word => word.word).sort();
-    const currentProfile = currentOrder.map(word => word.word).sort();
+    const candidateProfile = candidate.map(word => word.word).sort((a, b) => b.length - a.length || a.localeCompare(b));
+    const currentProfile = current.map(word => word.word).sort((a, b) => b.length - a.length || a.localeCompare(b));
+    for (let i = 0; i < Math.min(candidateProfile.length, currentProfile.length); i++) {
+      const lengthDifference = candidateProfile[i]!.length - currentProfile[i]!.length;
+      if (lengthDifference)
+        return lengthDifference > 0;
+    }
+    if (candidateProfile.length !== currentProfile.length)
+      return candidateProfile.length > currentProfile.length;
     for (let i = 0; i < candidateProfile.length; i++) {
       const difference = candidateProfile[i]!.localeCompare(currentProfile[i]!);
       if (difference)
@@ -234,14 +237,9 @@ function selectNonOverlappingWords(paths: ScoredWord[]): ScoredWord[] {
     return false;
   }
   function choose(start: number, available: number, used: Set<string>, selected: ScoredWord[]): ScoredWord[] {
-    // Sets are judged in the top-down order they would fall back to, so a word
-    // played earlier can still repair a later word's path during selection.
-    let best = playable([...selected].sort(topDown)) ? selected : [];
-    let nextLength = 0;
+    let best = orderForPlay(selected).length ? selected : [];
     for (let index = start; index < candidates.length; index++) {
       const candidate = candidates[index]!;
-      if (nextLength && candidate.word.word.length < nextLength)
-        break;
       if ((candidate.mask & available) !== candidate.mask || used.has(candidate.word.word))
         continue;
       const selection = [...selected, candidate.word];
@@ -249,7 +247,6 @@ function selectNonOverlappingWords(paths: ScoredWord[]): ScoredWord[] {
       const result = choose(index + 1, available ^ candidate.mask, used, selection);
       used.delete(candidate.word.word);
       if (result.length >= selection.length) {
-        nextLength = candidate.word.word.length;
         if (isBetter(result, best))
           best = result;
       }

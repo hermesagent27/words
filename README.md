@@ -33,9 +33,10 @@ not recognize every hand or lighting condition.
 The scanner cannot tell that a replacement tile has the same letter as the
 previous tile. The timed refresh still clears the board memory in that case.
 
-The app prioritizes long, non-overlapping words and lists them from top to
-bottom, based on their average tile row. It simulates gravity after each word
-and only includes follow-up paths whose original letters remain adjacent.
+The app prioritizes long, non-overlapping words, trying the largest first when
+that leaves a playable sequence; top-to-bottom position breaks ties. It
+simulates gravity after each word and only includes follow-up paths whose
+original letters remain adjacent.
 Replacement tiles are unknown and are not used in the plan. The numbered
 paths mark the original snapshot, so later paths can move as tiles fall; the
 two-second refresh can produce a new plan. Each word scores one point per
