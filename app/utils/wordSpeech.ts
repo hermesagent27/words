@@ -1,12 +1,13 @@
 import type { ScoredWord } from "./solver";
 
-type Utterance = Pick<SpeechSynthesisUtterance, "onend" | "onerror" | "rate">;
+type Utterance = Pick<SpeechSynthesisUtterance, "onend" | "onerror" | "onstart" | "rate">;
 type SpokenWord = Pick<ScoredWord, "word" | "path">;
 
 export function createWordSpeech<T extends Utterance>(
   synthesis: { speak: (utterance: T) => void; cancel: () => void },
   createUtterance: (text: string) => T,
   reportError: (message: string) => void,
+  onWordStart: (index: number) => void = () => {},
 ) {
   let revision = 0;
   let active: T | null = null;
@@ -32,7 +33,7 @@ export function createWordSpeech<T extends Utterance>(
     }
   }
 
-  function speakMessages(messages: string[]) {
+  function speakMessages(messages: string[], revealWords = false) {
     if (!stop() || !messages.length)
       return;
     const current = revision;
@@ -43,6 +44,10 @@ export function createWordSpeech<T extends Utterance>(
         const utterance = createUtterance(messages[index]!);
         utterance.rate = 0.9;
         active = utterance;
+        utterance.onstart = () => {
+          if (revision === current && active === utterance && revealWords)
+            onWordStart(index);
+        };
         utterance.onerror = (event) => {
           if (revision !== current || active !== utterance)
             return;
@@ -73,7 +78,7 @@ export function createWordSpeech<T extends Utterance>(
   }
 
   function speak(words: SpokenWord[]) {
-    speakMessages(words.map(({ word }) => word));
+    speakMessages(words.map(({ word }) => word), true);
   }
 
   function enable() {

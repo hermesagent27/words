@@ -56,11 +56,13 @@ Use the speaker button to enable or mute speech. When enabled, the app reads
 each locked board's suggested words once in their displayed order; enabling it
 on an already locked board reads that board immediately. Otherwise it says
 "Speech enabled" while waiting for a board. Only words are spoken, with a
-300 ms pause between them and a speech rate of 0.9. Muting or detecting a
-changed suggested path stops the previous speech. A newly locked board is read
-automatically, but timed refreshes of the same board do not repeat or interrupt
-its speech. Speech is off initially because browsers may require a user gesture,
-and availability depends on the browser and installed voices.
+300 ms pause between them and a speech rate of 0.9. Path lines stay hidden until
+speech starts; each word's path is drawn one segment at a time, 200 ms per
+segment, as the word is spoken. Muting or detecting a changed suggested path
+stops the previous speech. A newly locked board is read automatically, but
+timed refreshes of the same board do not repeat or interrupt its speech. Speech
+is off initially because browsers may require a user gesture, and availability
+depends on the browser and installed voices.
 
 Run scanner and gravity checks with:
 

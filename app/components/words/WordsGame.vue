@@ -17,6 +17,7 @@ const frozen = ref<{ width: number; height: number } | null>(null);
 const speechEnabled = ref(false);
 const speechSupported = ref(false);
 const speechError = ref<string | null>(null);
+const revealedWordIndex = ref(-1);
 const scanning = ref(false);
 const processedSnapshots = ref(0);
 const detection = ref<Point[] | null>(null);
@@ -35,6 +36,11 @@ let pending: { frame: HTMLCanvasElement; revision: number } | null = null;
 let monitor: ReturnType<typeof createWordChangeMonitor> | null = null;
 let speech: ReturnType<typeof createWordSpeech<SpeechSynthesisUtterance>> | null = null;
 
+function stopSpeech() {
+  speech?.stop();
+  revealedWordIndex.value = -1;
+}
+
 function resetBoard() {
   clearRefreshTimer();
   revision++;
@@ -45,6 +51,7 @@ function resetBoard() {
   detection.value = null;
   tiles.value = null;
   selectedWords.value = [];
+  revealedWordIndex.value = -1;
   lastSignature.value = "";
   statusLine.value = "Looking for board…";
 }
@@ -69,7 +76,7 @@ function toggleSpeech() {
   speechEnabled.value = !speechEnabled.value;
   speechError.value = null;
   if (!speechEnabled.value) {
-    speech.stop();
+    stopSpeech();
     lastSpokenSignature = "";
     return;
   }
@@ -148,6 +155,17 @@ function colorAt(index: number): string {
   return colors[index] ?? fallbackColor;
 }
 
+function pathLineStyle(wordIndex: number, segmentIndex: number, from: Point, to: Point) {
+  const length = Math.hypot(to.x - from.x, to.y - from.y);
+  const visible = wordIndex <= revealedWordIndex.value;
+  const animating = wordIndex === revealedWordIndex.value;
+  return {
+    strokeDasharray: `${length} ${length}`,
+    strokeDashoffset: visible ? 0 : length,
+    transition: animating ? `stroke-dashoffset 200ms linear ${segmentIndex * 200}ms` : "none",
+  };
+}
+
 function lockSnapshot(frame: HTMLCanvasElement, board: Tile[][]) {
   const canvas = snapshotEl.value;
   if (!canvas) {
@@ -164,6 +182,7 @@ function lockSnapshot(frame: HTMLCanvasElement, board: Tile[][]) {
   context.drawImage(frame, 0, 0);
   frozen.value = { width: frame.width, height: frame.height };
   monitor = createWordChangeMonitor(board, selectedWords.value);
+  revealedWordIndex.value = -1;
   statusLine.value = selectedWords.value.length > 2
     ? "Board locked — refreshing shortly or when a suggested word changes"
     : `Board locked — refreshing shortly (0/${selectedWords.value.length} suggested words changed)`;
@@ -258,7 +277,7 @@ async function processSnapshots() {
           continue;
         }
         clearRefreshTimer();
-        speech?.stop();
+        stopSpeech();
         lastSpokenSignature = "";
         monitor = null;
         frozen.value = null;
@@ -295,6 +314,7 @@ onMounted(async () => {
       window.speechSynthesis,
       text => new SpeechSynthesisUtterance(text),
       message => speechError.value = message,
+      index => revealedWordIndex.value = index,
     );
     speechSupported.value = true;
   }
@@ -308,7 +328,7 @@ onMounted(async () => {
 });
 
 onUnmounted(() => {
-  speech?.stop();
+  stopSpeech();
   document.removeEventListener("visibilitychange", visibilityChanged);
   stopScanning();
   stopCamera();
@@ -422,6 +442,7 @@ onUnmounted(() => {
                   :x2="point.x"
                   :y2="point.y"
                   :stroke="colorAt(index)"
+                  :style="pathLineStyle(index, i, path[i]!, point)"
                   stroke-width="12"
                   stroke-linecap="round"
                 />
