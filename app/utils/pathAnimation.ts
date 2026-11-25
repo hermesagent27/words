@@ -1,7 +1,7 @@
 import type { Point } from "./boardGeometry";
 
 export function pathAnimationDuration(word: string): number {
-  return word.length <= 4 ? 150 : word.length <= 7 ? 250 : 450;
+  return word.length <= 4 ? 200 : word.length <= 7 ? 300 : 500;
 }
 
 export function pathLineStyle(word: string, segmentCount: number, segmentIndex: number, from: Point, to: Point) {

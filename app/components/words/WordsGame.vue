@@ -543,6 +543,16 @@ onUnmounted(() => {
                 stroke-width="12"
                 stroke-linecap="round"
               />
+              <circle
+                v-if="path[0]"
+                v-show="animatedWords.includes(index)"
+                :cx="path[0].x"
+                :cy="path[0].y"
+                r="30"
+                :fill="colorAt(index)"
+                stroke="white"
+                stroke-width="3"
+              />
             </template>
           </svg>
         </div>
