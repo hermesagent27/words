@@ -59,14 +59,17 @@ function letterValue(letter: string): number {
 }
 
 /**
- * Word score: summed letter values times a length multiplier that grows with
- * word length, so longer words and rarer letters dominate rankings.
- *   score = sum(values) * 5 * (spelledLetters + 10), rounded to the nearest 5
- *   (multipliers: 2L=60, 3L=65, 4L=70, 5L=75, 6L=80, 7L=85, 8L=90, +5 per extra letter)
+ * Word score: summed tile values times a per-length multiplier, so longer
+ * words and rarer letters raise the score. The Qu tile counts as ONE tile
+ * worth 4 points. Multipliers measured from real game results:
+ *   2 tiles: 22.5x  3: 35x  4: 50x  5: 65x  6: 75x  7: 85x  8+: 87.5x
+ * Final scores round to the nearest 5 (22.5/87.5 only land on .5 sums).
  */
-function scoreLetters(letterSum: number, spelledLength: number): number {
-  const raw = letterSum * 5 * (spelledLength + 10);
-  return Math.round(raw / 5) * 5;
+const LENGTH_MULTIPLIERS = [0, 0, 22.5, 35, 50, 65, 75, 85, 87.5];
+
+function scoreLetters(letterSum: number, tileCount: number): number {
+  const multiplier = LENGTH_MULTIPLIERS[Math.min(tileCount, LENGTH_MULTIPLIERS.length - 1)]!;
+  return Math.round(letterSum * multiplier / 5) * 5;
 }
 
 class TrieNode {
@@ -140,9 +143,10 @@ function inBounds(r: number, c: number) {
 
 /**
  * Find every valid word on the board, return them sorted by score desc then length desc.
- * Word score = sum of letter values x 5 x (spelled letters + 10), rounded to
- * the nearest 5. The path tracks its running letter-value sum; the final
- * score is computed at word completion with the length multiplier applied.
+ * Word score = sum of tile values x per-length multiplier, rounded to the
+ * nearest 5. The path tracks its running tile-value sum; the final score is
+ * computed at word completion using the path length (number of tiles). The
+ * Qu tile counts as ONE tile for both the value sum and the tile count.
  * Tiles: 4x4 array of { letter }.
  * trie: pre-built dictionary trie.
  */
@@ -172,7 +176,7 @@ function findWordPaths(tiles: Tile[][], trie: Trie): ScoredWord[] {
         const value = tiles[p.row]![p.col]!.letter.toLowerCase();
         return value === "q" ? "qu" : value;
       }).join("");
-      found.push({ word, score: scoreLetters(newSum, word.length), path: newPath });
+      found.push({ word, score: scoreLetters(newSum, newPath.length), path: newPath });
     }
 
     visited[r]![c] = true;
