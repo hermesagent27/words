@@ -1,4 +1,6 @@
 import tailwindcss from "@tailwindcss/vite";
+
+import pkg from "./package.json" with { type: "json" };
 // https://nuxt.com/docs/api/configuration/nuxt-config
 export default defineNuxtConfig({
   compatibilityDate: "2025-07-15",
@@ -32,5 +34,8 @@ export default defineNuxtConfig({
     authPassword: process.env.APP_PASSWORD || process.env.AUTH_PASSWORD || "changeme",
     githubToken: process.env.GITHUB_TOKEN || "",
     githubRepo: process.env.GITHUB_REPO || "hermesagent27/words",
+    public: {
+      appVersion: pkg.version,
+    },
   },
 });
