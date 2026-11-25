@@ -191,7 +191,7 @@ test("overlay projection follows perspective rather than bilinear interpolation"
 test("path segments share the whole-word duration based on spelled length", () => {
   const from = { x: 0, y: 0 };
   const to = { x: 3, y: 4 };
-  for (const [word, segmentCount, totalDuration] of [["at", 1, 200], ["quit", 2, 200], ["quite", 3, 300], ["seventh", 6, 300], ["eighteen", 7, 500]] as const) {
+  for (const [word, segmentCount, totalDuration] of [["at", 1, 150], ["quit", 2, 150], ["quite", 3, 250], ["seventh", 6, 250], ["eighteen", 7, 450]] as const) {
     const segmentIndex = segmentCount - 1;
     const duration = totalDuration / segmentCount;
     const style = pathLineStyle(word, segmentCount, segmentIndex, from, to);
@@ -206,7 +206,7 @@ test("silent paths animate in order and cancel when replaced", (t) => {
   const sequence = createSilentPathSequence(index => actions.push(index), () => actions.push("done"));
   sequence.start(["quit", "seventh"]);
   assert.deepEqual(actions, [0]);
-  t.mock.timers.tick(499);
+  t.mock.timers.tick(449);
   assert.deepEqual(actions, [0]);
   t.mock.timers.tick(1);
   assert.deepEqual(actions, [0, 1]);
@@ -214,7 +214,7 @@ test("silent paths animate in order and cancel when replaced", (t) => {
   t.mock.timers.tick(1000);
   assert.deepEqual(actions, [0, 1]);
   sequence.start(["eighteen"]);
-  t.mock.timers.tick(649);
+  t.mock.timers.tick(599);
   assert.deepEqual(actions, [0, 1, 0]);
   t.mock.timers.tick(1);
   assert.deepEqual(actions, [0, 1, 0, "done"]);

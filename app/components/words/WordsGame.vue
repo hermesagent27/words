@@ -43,6 +43,10 @@ let monitor: ReturnType<typeof createWordChangeMonitor> | null = null;
 let speech: ReturnType<typeof createWordSpeech<SpeechSynthesisUtterance>> | null = null;
 const silentSequence = createSilentPathSequence(animateWord, finishPlayback);
 
+function onVoicesChanged() {
+  speech?.warmVoice();
+}
+
 function animateWord(index: number) {
   const word = selectedWords.value[index];
   if (word && !animatedWords.value.includes(index)) {
@@ -92,6 +96,7 @@ function startPlayback(spoken: boolean) {
   playbackActive = true;
   if (spoken && speech) {
     speechError.value = null;
+    animateWord(0);
     speech.speak(selectedWords.value);
     lastSpokenSignature = lastSignature.value;
   }
@@ -133,7 +138,7 @@ function scheduleBoardRefresh() {
       resetBoard();
       captureSnapshot();
     }
-  }, 2000);
+  }, 2500);
 }
 
 function toggleSpeech() {
@@ -380,6 +385,7 @@ onMounted(async () => {
       finishSpokenPlayback,
     );
     speechSupported.value = true;
+    window.speechSynthesis.addEventListener?.("voiceschanged", onVoicesChanged);
   }
   else {
     speechError.value = "Text-to-speech is not supported in this browser.";
@@ -392,6 +398,8 @@ onMounted(async () => {
 
 onUnmounted(() => {
   stopSpeech();
+  if (speechSupported.value && window.speechSynthesis)
+    window.speechSynthesis.removeEventListener?.("voiceschanged", onVoicesChanged);
   document.removeEventListener("visibilitychange", visibilityChanged);
   stopScanning();
   stopCamera();
@@ -574,7 +582,7 @@ onUnmounted(() => {
             <div v-for="(word, i) in selectedWords" :key="`${word.word}-${i}`" class="flex items-baseline gap-1">
               <span :style="{ color: colorAt(i) }" aria-hidden="true">●</span>
               <span class="text-xs">{{ i + 1 }}.</span>
-              <span class="text-base font-semibold tracking-wide">{{ word.word.toUpperCase() }}</span>
+              <span class="text-lg font-bold tracking-wide">{{ word.word.toUpperCase() }}</span>
               <span class="text-xs text-base-content/70">{{ word.score }} pts</span>
               <span v-if="predictedTiles[i + 1]" class="font-mono text-xs text-base-content/70">→ {{ predictedTiles[i + 1] }}</span>
             </div>

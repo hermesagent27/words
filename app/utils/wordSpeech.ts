@@ -1,10 +1,34 @@
 import type { ScoredWord } from "./solver";
 
-type Utterance = Pick<SpeechSynthesisUtterance, "onend" | "onerror" | "onstart" | "rate">;
+type Utterance = Pick<SpeechSynthesisUtterance, "onend" | "onerror" | "onstart" | "rate" | "voice">;
 type SpokenWord = Pick<ScoredWord, "word" | "path">;
 
+/** Voices known for clear diction; first available match wins. Falls back to any local en-US voice. */
+const PREFERRED_VOICE_NAMES = [
+  "Samantha",
+  "Google US English",
+  "Microsoft Aria Online (Natural) - English (United States)",
+  "Microsoft Jenny Online (Natural) - English (United States)",
+  "Alex",
+  "Karen",
+  "Moira",
+  "Tessa",
+  "Fred",
+];
+
+function pickClearVoice(voices: SpeechSynthesisVoice[]): SpeechSynthesisVoice | null {
+  for (const name of PREFERRED_VOICE_NAMES) {
+    const match = voices.find(v => v.name === name);
+    if (match)
+      return match;
+  }
+  return voices.find(v => v.localService && v.lang.startsWith("en"))
+    ?? voices.find(v => v.lang.startsWith("en"))
+    ?? null;
+}
+
 export function createWordSpeech<T extends Utterance>(
-  synthesis: { speak: (utterance: T) => void; cancel: () => void },
+  synthesis: { speak: (utterance: T) => void; cancel: () => void; getVoices?: () => SpeechSynthesisVoice[] },
   createUtterance: (text: string) => T,
   reportError: (message: string) => void,
   onWordStart: (index: number) => void = () => {},
@@ -13,6 +37,19 @@ export function createWordSpeech<T extends Utterance>(
   let revision = 0;
   let active: T | null = null;
   let pause: ReturnType<typeof setTimeout> | null = null;
+  let cachedVoice: SpeechSynthesisVoice | null = null;
+
+  function resolveVoice(): SpeechSynthesisVoice | null {
+    if (cachedVoice)
+      return cachedVoice;
+    if (typeof synthesis.getVoices !== "function")
+      return null;
+    const voices = synthesis.getVoices();
+    if (!voices.length)
+      return null;
+    cachedVoice = pickClearVoice(voices);
+    return cachedVoice;
+  }
 
   function stop(): boolean {
     revision++;
@@ -44,6 +81,9 @@ export function createWordSpeech<T extends Utterance>(
       try {
         const utterance = createUtterance(messages[index]!);
         utterance.rate = 0.9;
+        const voice = resolveVoice();
+        if (voice)
+          utterance.voice = voice;
         active = utterance;
         utterance.onstart = () => {
           if (revision === current && active === utterance && revealWords)
@@ -93,5 +133,10 @@ export function createWordSpeech<T extends Utterance>(
     speakMessages(["Speech enabled."]);
   }
 
-  return { enable, speak, stop };
+  function warmVoice() {
+    cachedVoice = null;
+    resolveVoice();
+  }
+
+  return { enable, speak, stop, warmVoice };
 }

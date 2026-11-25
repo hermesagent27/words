@@ -40,7 +40,7 @@ simulates gravity after each word and only includes follow-up paths whose
 original letters remain adjacent.
 Replacement tiles are unknown and are not used in the plan. The numbered
 paths mark the original snapshot, so later paths can move as tiles fall; the
-two-second refresh can produce a new plan. Each word scores one point per
+two-and-a-half-second refresh can produce a new plan. Each word scores one point per
 spelled letter; a Q tile spells QU and therefore counts as two letters.
 Suggested paths have larger solid-color start markers.
 The camera or locked snapshot and suggested words fit within the available
@@ -59,8 +59,8 @@ on an already locked board reads that board immediately. Otherwise it says
 "Speech enabled" while waiting for a board. Only words are spoken, with a
 300 ms pause between them and a speech rate of 0.9. Paths remain visible and
 are highlighted segment by segment as each word is spoken, or in order without
-speech when muted. Each highlight takes 200 ms for 2–4 letters, 300 ms for 5–7,
-and 500 ms for 8 or more. Muting stops speech and restarts the highlights
+speech when muted. Each highlight takes 150 ms for 2–4 letters, 250 ms for 5–7,
+and 450 ms for 8 or more. Muting stops speech and restarts the highlights
 silently; detecting a changed suggested path stops the previous speech and
 highlights. Timed refreshes of the same board do not repeat speech, but do
 replay its highlights. Speech is off initially because browsers may require a
