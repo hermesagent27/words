@@ -20,7 +20,8 @@ export type ScoredWord = {
 };
 
 /**
- * Per-letter tile values (q is always the "qu" tile and scores q + u = 6).
+ * Per-letter tile values. The Q tile is always the "Qu" tile and is worth 4
+ * points total; a standalone U tile is worth 2.
  */
 const LETTER_VALUES: Record<string, number> = {
   a: 2,
@@ -53,7 +54,7 @@ const LETTER_VALUES: Record<string, number> = {
 
 function letterValue(letter: string): number {
   return letter === "q" || letter === "qu"
-    ? LETTER_VALUES.q! + LETTER_VALUES.u!
+    ? LETTER_VALUES.q!
     : LETTER_VALUES[letter] ?? 0;
 }
 
