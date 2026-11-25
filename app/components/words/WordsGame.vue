@@ -4,7 +4,7 @@ import type { ScoredWord, Tile } from "~/utils/solver";
 
 import { projectBoardPoint } from "~/utils/boardGeometry";
 import { createBoardConsensus, createWordChangeMonitor, currentConfirmedBoard, hasEnoughReadableTiles } from "~/utils/consensus";
-import { createSilentPathSequence, pathAnimationDuration, pathLineStyle } from "~/utils/pathAnimation";
+import { createSilentPathSequence, pathAnimationDuration, pathLineStyle, wordStepChunks } from "~/utils/pathAnimation";
 import { predictedBoards, predictPathPosition, suggestedWords } from "~/utils/solver";
 import { createWordSpeech } from "~/utils/wordSpeech";
 
@@ -234,6 +234,17 @@ const predictedTiles = computed(() => {
 
 function colorAt(index: number): string {
   return colors[index] ?? fallbackColor;
+}
+
+/** Letters per path step, synced to the redraw segments (Qu tile = one step). */
+const stepLabels = computed(() =>
+  selectedWords.value.map(word => wordStepChunks(word.word.toLowerCase()).map(chunk => chunk.toUpperCase())));
+
+function stepLabelStyle(word: string, stepCount: number, stepIndex: number) {
+  const stepMs = pathAnimationDuration(word) / stepCount;
+  return {
+    animation: `draw-step-label ${stepMs}ms linear ${stepIndex * stepMs}ms forwards`,
+  };
 }
 
 function lockSnapshot(frame: HTMLCanvasElement, board: Tile[][]) {
@@ -553,6 +564,23 @@ onUnmounted(() => {
                 stroke="white"
                 stroke-width="3"
               />
+              <text
+                v-for="(point, i) in path"
+                v-show="animatedWords.includes(index)"
+                :key="`label-${i}`"
+                :x="point.x"
+                :y="point.y"
+                :fill="colorAt(index)"
+                stroke="white"
+                stroke-width="6"
+                paint-order="stroke"
+                font-size="150"
+                font-weight="bold"
+                text-anchor="middle"
+                dominant-baseline="central"
+                class="draw-step-label"
+                :style="stepLabelStyle(selectedWords[index]!.word, path.length, i)"
+              >{{ stepLabels[index]?.[i] }}</text>
             </template>
           </svg>
         </div>
@@ -609,6 +637,22 @@ onUnmounted(() => {
 @keyframes draw-path-line {
   to {
     stroke-dashoffset: 0;
+  }
+}
+
+.draw-step-label {
+  opacity: 0;
+}
+
+@keyframes draw-step-label {
+  0% {
+    opacity: 0;
+  }
+  15% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 1;
   }
 }
 </style>
