@@ -10,7 +10,7 @@ export function pathLineStyle(word: string, segmentCount: number, segmentIndex: 
   return {
     strokeDasharray: `${length} ${length}`,
     strokeDashoffset: length,
-    animation: `draw-path-line ${duration}ms linear ${segmentIndex * duration}ms forwards, fade-path-line 150ms linear ${pathAnimationDuration(word)}ms forwards`,
+    animation: `draw-path-line ${duration}ms linear ${segmentIndex * duration}ms forwards`,
   };
 }
 

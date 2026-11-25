@@ -506,8 +506,10 @@ onUnmounted(() => {
               opacity="0.7"
             />
             <template v-for="(path, index) in paths" :key="index">
-              <template v-for="(point, i) in path.slice(1)" :key="i">
+              <template v-if="!animatedWords.includes(index)">
                 <line
+                  v-for="(point, i) in path.slice(1)"
+                  :key="i"
                   :x1="path[i]!.x"
                   :y1="path[i]!.y"
                   :x2="point.x"
@@ -516,34 +518,31 @@ onUnmounted(() => {
                   stroke-width="12"
                   stroke-linecap="round"
                 />
+                <circle
+                  v-if="path[0]"
+                  :cx="path[0].x"
+                  :cy="path[0].y"
+                  r="30"
+                  :fill="colorAt(index)"
+                  stroke="white"
+                  stroke-width="3"
+                />
               </template>
-              <circle
-                v-if="path[0]"
-                :cx="path[0].x"
-                :cy="path[0].y"
-                r="30"
-                :fill="colorAt(index)"
-                stroke="white"
-                stroke-width="3"
-              />
             </template>
             <template v-for="(path, index) in paths" :key="`animation-${animationRun}-${index}`">
-              <template v-for="(point, i) in path.slice(1)" :key="i">
-                <g v-if="animatedWords.includes(index)">
-                  <line
-                    v-for="stroke in ['black', 'white']"
-                    :key="stroke"
-                    :x1="path[i]!.x"
-                    :y1="path[i]!.y"
-                    :x2="point.x"
-                    :y2="point.y"
-                    :stroke="stroke"
-                    :style="pathLineStyle(selectedWords[index]!.word, path.length - 1, i, path[i]!, point)"
-                    :stroke-width="stroke === 'black' ? 10 : 5"
-                    stroke-linecap="round"
-                  />
-                </g>
-              </template>
+              <line
+                v-for="(point, i) in path.slice(1)"
+                v-show="animatedWords.includes(index)"
+                :key="i"
+                :x1="path[i]!.x"
+                :y1="path[i]!.y"
+                :x2="point.x"
+                :y2="point.y"
+                :stroke="colorAt(index)"
+                :style="pathLineStyle(selectedWords[index]!.word, path.length - 1, i, path[i]!, point)"
+                stroke-width="12"
+                stroke-linecap="round"
+              />
             </template>
           </svg>
         </div>
@@ -600,12 +599,6 @@ onUnmounted(() => {
 @keyframes draw-path-line {
   to {
     stroke-dashoffset: 0;
-  }
-}
-
-@keyframes fade-path-line {
-  to {
-    opacity: 0;
   }
 }
 </style>
