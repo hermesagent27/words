@@ -19,6 +19,55 @@ export type ScoredWord = {
   path: PathStep[];
 };
 
+/**
+ * Per-letter tile values (q is always the "qu" tile and scores q + u = 6).
+ */
+const LETTER_VALUES: Record<string, number> = {
+  a: 2,
+  b: 3,
+  c: 2,
+  d: 2,
+  e: 1,
+  f: 3,
+  g: 3,
+  h: 3,
+  i: 2,
+  j: 4,
+  k: 4,
+  l: 1,
+  m: 2,
+  n: 1,
+  o: 2,
+  p: 3,
+  q: 4,
+  r: 1,
+  s: 1,
+  t: 1,
+  u: 2,
+  v: 4,
+  w: 3,
+  x: 4,
+  y: 3,
+  z: 4,
+};
+
+function letterValue(letter: string): number {
+  return letter === "q" || letter === "qu"
+    ? LETTER_VALUES.q! + LETTER_VALUES.u!
+    : LETTER_VALUES[letter] ?? 0;
+}
+
+/**
+ * Word score: summed letter values times a length multiplier that grows with
+ * word length, so longer words and rarer letters dominate rankings.
+ *   score = sum(values) * 5 * (spelledLetters + 10), rounded to the nearest 5
+ *   (multipliers: 2L=60, 3L=65, 4L=70, 5L=75, 6L=80, 7L=85, 8L=90, +5 per extra letter)
+ */
+function scoreLetters(letterSum: number, spelledLength: number): number {
+  const raw = letterSum * 5 * (spelledLength + 10);
+  return Math.round(raw / 5) * 5;
+}
+
 class TrieNode {
   children: Map<string, TrieNode> = new Map();
   isWord = false;
@@ -90,7 +139,9 @@ function inBounds(r: number, c: number) {
 
 /**
  * Find every valid word on the board, return them sorted by score desc then length desc.
- * Word score = number of spelled letters along the path.
+ * Word score = sum of letter values x 5 x (spelled letters + 10), rounded to
+ * the nearest 5. The path tracks its running letter-value sum; the final
+ * score is computed at word completion with the length multiplier applied.
  * Tiles: 4x4 array of { letter }.
  * trie: pre-built dictionary trie.
  */
@@ -98,7 +149,7 @@ function findWordPaths(tiles: Tile[][], trie: Trie): ScoredWord[] {
   const found: ScoredWord[] = [];
   const visited: boolean[][] = Array.from({ length: 4 }, () => Array.from<boolean>({ length: 4 }).fill(false));
 
-  function dfs(r: number, c: number, node: TrieNode, path: PathStep[], score: number) {
+  function dfs(r: number, c: number, node: TrieNode, path: PathStep[], letterSum: number) {
     if (!inBounds(r, c) || visited[r]![c])
       return;
     const tile = tiles[r]![c]!;
@@ -113,19 +164,19 @@ function findWordPaths(tiles: Tile[][], trie: Trie): ScoredWord[] {
     }
 
     const newPath = [...path, { row: r, col: c }];
-    const newScore = score + (letter === "q" || letter === "qu" ? 2 : 1);
+    const newSum = letterSum + letterValue(letter);
 
     if (next.isWord) {
       const word = newPath.map((p) => {
         const value = tiles[p.row]![p.col]!.letter.toLowerCase();
         return value === "q" ? "qu" : value;
       }).join("");
-      found.push({ word, score: newScore, path: newPath });
+      found.push({ word, score: scoreLetters(newSum, word.length), path: newPath });
     }
 
     visited[r]![c] = true;
     for (const [dr, dc] of DIRS) {
-      dfs(r + dr!, c + dc!, next, newPath, newScore);
+      dfs(r + dr!, c + dc!, next, newPath, newSum);
     }
     visited[r]![c] = false;
   }
@@ -165,6 +216,7 @@ function selectNonOverlappingWords(paths: ScoredWord[]): ScoredWord[] {
     const aRows = a.path.reduce((sum, step) => sum + step.row, 0);
     const bRows = b.path.reduce((sum, step) => sum + step.row, 0);
     return aRows * b.path.length - bRows * a.path.length
+      || b.score - a.score
       || b.word.length - a.word.length
       || a.word.localeCompare(b.word);
   }
@@ -187,13 +239,13 @@ function selectNonOverlappingWords(paths: ScoredWord[]): ScoredWord[] {
     return true;
   }
 
-  /** Prefer longer words, backtracking when that prevents a playable sequence. */
+  /** Prefer higher-scoring words, backtracking when that prevents a playable sequence. */
   function orderForPlay(words: ScoredWord[]): ScoredWord[] {
     const candidates = words.map((word, index) => ({
       index,
       mask: word.path.reduce((bits, step) => bits | (1 << (step.row * 4 + step.col)), 0),
       word,
-    })).sort((a, b) => b.word.word.length - a.word.word.length || topDown(a.word, b.word));
+    })).sort((a, b) => b.word.score - a.word.score || b.word.word.length - a.word.word.length || topDown(a.word, b.word));
     const memo = new Map<number, ScoredWord[] | null>();
 
     function findOrder(remaining: number, removed: number): ScoredWord[] | null {
@@ -220,6 +272,10 @@ function selectNonOverlappingWords(paths: ScoredWord[]): ScoredWord[] {
   }
 
   function isBetter(candidate: ScoredWord[], current: ScoredWord[]): boolean {
+    const candidateTotal = candidate.reduce((sum, word) => sum + word.score, 0);
+    const currentTotal = current.reduce((sum, word) => sum + word.score, 0);
+    if (candidateTotal !== currentTotal)
+      return candidateTotal > currentTotal;
     const candidateProfile = candidate.map(word => word.word).sort((a, b) => b.length - a.length || a.localeCompare(b));
     const currentProfile = current.map(word => word.word).sort((a, b) => b.length - a.length || a.localeCompare(b));
     for (let i = 0; i < Math.min(candidateProfile.length, currentProfile.length); i++) {
@@ -272,7 +328,7 @@ export function bestWord(tiles: Tile[][], trie: Trie): ScoredWord | null {
   return all.length ? all[0]! : null;
 }
 
-/** Remove the played cells, drop survivors, and leave new top cells blank. */
+/** Remove the played cells, drop survivors above the gaps, and leave new top cells blank. */
 export function applyGravity(tiles: Tile[][], path: PathStep[]): Tile[][] {
   const used = new Set(path.map(step => `${step.row},${step.col}`));
   const result: Tile[][] = Array.from({ length: 4 }, (_, row) =>
